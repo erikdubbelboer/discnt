@@ -1,0 +1,15 @@
+.*.swp
+*.o
+*.log
+discnt-server
+discnt-cli
+doc-tools
+release
+misc/*
+src/release.h
+release.h
+src/transfer.sh
+src/configs
+.make-*
+.prerequisites
+*.dSYM
