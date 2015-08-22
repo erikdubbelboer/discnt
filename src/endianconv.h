@@ -71,4 +71,7 @@ uint64_t intrev64(uint64_t v);
 #define ntohu64(v) intrev64(v)
 #endif
 
+uint64_t pack754(long double f, unsigned bits, unsigned expbits);
+long double unpack754(uint64_t i, unsigned bits, unsigned expbits);
+
 #endif

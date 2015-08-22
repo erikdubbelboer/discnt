@@ -30,13 +30,42 @@
 #ifndef __DISCNT_COUNTER_H
 #define __DISCNT_COUNTER_H
 
-#include "dict.h"
+#include "adlist.h"
+#include "cluster.h"
+
+
+typedef struct replica {
+    clusterNode *node;
+    char         node_name[DISCNT_CLUSTER_NAMELEN];
+
+    /* For our replica (node == myself) this is the actual value.
+     * For other replicas this is our last prediction of the value.
+     */
+    long double value;
+    long double *history; /* History of this replica per second for server.history_size seconds. */
+
+    mstime_t    predict_time;   /* Time we made the last prediction. */
+    long double predict_value;  /* Value at the last prediction. */
+    long double predict_change; /* Change per micro second. */
+} replica;
 
 /* Counter representation in memory. */
 typedef struct counter {
-    dict *replicas;
+    sds      name;
+    list     *replicas;
+
+    long double value; /* Cached value. */
 } counter;
 
-void dictCounterDestructor(void *privdata, void *val);
+
+/*-----------------------------------------------------------------------------
+ * Exported API.
+ *----------------------------------------------------------------------------*/
+
+counter *counterLookup(sds name);
+counter *counterCreate(sds name);
+void countersAddNode(clusterNode *node);
+void countersNodeFail(clusterNode *node);
+void clusterSendReplica(sds name, replica* repl);
 
 #endif

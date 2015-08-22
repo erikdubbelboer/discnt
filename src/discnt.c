@@ -120,6 +120,10 @@ struct serverCommand serverCommandTable[] = {
     {"command",commandCommand,0,"rl",0,NULL,0,0,0,0,0},
     {"latency",latencyCommand,-2,"arl",0,NULL,0,0,0,0,0},
     {"hello",helloCommand,1,"rF",0,NULL,0,0,0,0,0},
+
+    /* Counter commands. */
+    {"incr",incrCommand,3,"wmF",0,NULL,0,0,0,0,0},
+    {"get",getCommand,2,"rF",0,NULL,0,0,0,0,0},
 };
 
 /*============================ Utility functions ============================ */
@@ -469,9 +473,7 @@ void updateDictResizePolicy(void) {
  * like a fresh instance just rebooted. */
 void flushServerData(void) {
     dictSafeForeach(server.counters,de)
-        counter *counter = dictGetKey(de);
-        /* TODO: Discnt unregisterJob(counter);
-        freeJob(counter);*/
+        dictCounterDestructor(NULL, dictGetVal(de));
     dictEndForeach
 }
 
@@ -663,12 +665,14 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
         server.shutdown_asap = 0;
     }
 
-    /* Show information about connected clients */
+    /* Show information, */
     run_with_period(5000) {
         serverLog(DISCNT_VERBOSE,
             "%lu clients connected, %zu bytes in use",
             listLength(server.clients),
             zmalloc_used_memory());
+
+        serverLog(DISCNT_VERBOSE,"DB: %lu keys in %lu slots HT.",dictSize(server.counters),dictSlots(server.counters));
     }
 
     /* We need to do a few operations on clients asynchronously. */
@@ -676,6 +680,11 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
 
     /* Handle background operations on Discnt. */
     databasesCron();
+
+    /* Check counters once per second. */
+    run_with_period(1000) {
+        countersCron();
+    }
 
     /* Close clients that need to be closed asynchronous */
     freeClientsInAsyncFreeQueue();
@@ -813,6 +822,9 @@ void initServerConfig(void) {
     server.requirepass = NULL;
     server.activerehashing = DISCNT_DEFAULT_ACTIVE_REHASHING;
     server.maxclients = DISCNT_MAX_CLIENTS;
+    server.precision = DISCNT_PRECISION;
+    server.history_size = DISCNT_HISTORY;
+    server.history_index = 0;
     server.bpop_blocked_clients = 0;
     server.maxmemory = DISCNT_DEFAULT_MAXMEMORY;
     server.shutdown_asap = 0;

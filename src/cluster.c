@@ -31,6 +31,7 @@
 #include "discnt.h"
 #include "cluster.h"
 #include "endianconv.h"
+#include "counter.h"
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -60,11 +61,13 @@ sds clusterGenNodesDescription(int filter);
 int clusterNodeAddSlave(clusterNode *master, clusterNode *slave);
 void clusterSetMaster(clusterNode *n);
 void clusterDoBeforeSleep(int flags);
-void clusterSendUpdate(clusterLink *link, clusterNode *node);
 void clusterSetNodeAsMaster(clusterNode *n);
 void clusterDelNode(clusterNode *delnode);
 void clusterShuffleReachableNodes(void);
 sds representDiscntNodeFlags(sds ci, uint16_t flags);
+void clusterBuildMessageHdr(clusterMsg *hdr, int type);
+void clusterSendMessage(clusterLink *link, unsigned char *msg, size_t msglen);
+void cluserReadReplica(clusterMsgDataCounter *msg, clusterNode *node);
 
 /* -----------------------------------------------------------------------------
  * Initialization
@@ -672,6 +675,8 @@ void freeClusterNode(clusterNode *n) {
 int clusterAddNode(clusterNode *node) {
     int retval;
 
+    countersAddNode(node);
+
     retval = dictAdd(server.cluster->nodes, node->name, node);
     return (retval == DICT_OK) ? DISCNT_OK : DISCNT_ERR;
 }
@@ -840,6 +845,8 @@ void markNodeAsFailingIfNeeded(clusterNode *node) {
     node->flags &= ~DISCNT_NODE_PFAIL;
     node->flags |= DISCNT_NODE_FAIL;
     node->fail_time = mstime();
+
+    countersNodeFail(node);
 
     /* Broadcast the failing node name to everybody, forcing all the other
      * reachable nodes to flag the node as FAIL. */
@@ -1089,6 +1096,13 @@ int clusterProcessPacket(clusterLink *link) {
 
         explen += sizeof(clusterMsgDataFail);
         if (totlen != explen) return 1;
+    } else if (type == CLUSTERMSG_TYPE_COUNTER) {
+        uint32_t explen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
+
+        explen += sizeof(clusterMsgDataCounter) -
+                  sizeof(hdr->data.counter.repl.name);
+        explen += intrev16ifbe(hdr->data.counter.repl.name_length);
+        if (totlen != explen) return 1;
     }
 
     /* Check if the sender is a known node. */
@@ -1238,12 +1252,20 @@ int clusterProcessPacket(clusterLink *link) {
             serverLog(DISCNT_VERBOSE,
                 "FAIL message received from %.40s about %.40s",
                 hdr->sender, hdr->data.fail.about.nodename);
+
             failing->flags |= DISCNT_NODE_FAIL;
             failing->fail_time = mstime();
             failing->flags &= ~DISCNT_NODE_PFAIL;
+
+            countersNodeFail(failing);
+
             clusterDoBeforeSleep(CLUSTER_TODO_SAVE_CONFIG|
                                  CLUSTER_TODO_UPDATE_STATE);
         }
+    } else if (type == CLUSTERMSG_TYPE_COUNTER) {
+        if (!sender) return 1;
+
+        cluserReadReplica(&hdr->data.counter.repl, sender);
     } else {
         serverLog(DISCNT_WARNING,"Received unknown packet type: %d", type);
     }
@@ -1410,7 +1432,7 @@ void clusterBuildMessageHdr(clusterMsg *hdr, int type) {
         totlen += sizeof(clusterMsgDataFail);
     }
     hdr->totlen = htonl(totlen);
-    /* For PING, PONG, and MEET, fixing the totlen field is up to the caller. */
+    /* For PING, PONG, MEET and COUNTER, fixing the totlen field is up to the caller. */
 }
 
 /* Send a PING or PONG packet to the specified node, making sure to add enough
@@ -2062,4 +2084,104 @@ void helloCommand(client *c) {
         addReplyBulkLongLong(c,node->port); /* TCP port. */
         addReplyBulkLongLong(c,priority); /* Priority. */
     dictEndForeach
+}
+
+/* -----------------------------------------------------------------------------
+ * CLUSTER counters
+ * -------------------------------------------------------------------------- */
+
+void clusterSendReplica(sds name, replica* repl) {
+    clusterNode *node;
+    int i;
+    unsigned char buf[sizeof(clusterMsg) + 32], *payload;
+    clusterMsg *hdr = (clusterMsg*) buf;
+    uint32_t totlen;
+
+    if (server.cluster->reachable_nodes_count == 0) {
+        return;
+    }
+
+    totlen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
+    totlen += sizeof(clusterMsgDataCounter) - sizeof(hdr->data.counter.repl.name);
+    totlen += sdslen(name);
+
+    clusterBuildMessageHdr(hdr,CLUSTERMSG_TYPE_COUNTER);
+    hdr->totlen = htonl(totlen);
+
+    hdr->data.counter.repl.predict_time = intrev64ifbe(repl->predict_time);
+    hdr->data.counter.repl.predict_value = intrev64ifbe(pack754(repl->predict_value, 64, 11));
+    hdr->data.counter.repl.predict_change = intrev64ifbe(pack754(repl->predict_change, 64, 11));
+    hdr->data.counter.repl.name_length = intrev16ifbe(sdslen(name));
+
+    if (totlen < sizeof(buf)) {
+        payload = buf;
+    } else {
+        payload = zmalloc(totlen);
+        memcpy(payload,buf,sizeof(clusterMsg));
+        hdr = (clusterMsg*) payload;
+    }
+
+    memcpy(hdr->data.counter.repl.name, name, sdslen(name));
+
+    for (i = 0; i < server.cluster->reachable_nodes_count; i++) {
+        node = server.cluster->reachable_nodes[i];
+
+        if (node->link == NULL) continue;
+
+        clusterSendMessage(node->link,payload,totlen);
+    }
+
+    if (payload != buf) {
+        zfree(payload);
+    }
+}
+
+void cluserReadReplica(clusterMsgDataCounter *msg, clusterNode *node) {
+    uint32_t name_length;
+    mstime_t predict_time;
+    long double predict_value, predict_change;
+    sds name;
+    counter *cntr;
+    listNode *ln;
+    listIter li;
+    replica *repl = NULL;
+
+    name_length = intrev16ifbe(msg->name_length);
+    name = sdsnewlen(msg->name,name_length);
+
+    predict_time   = intrev64ifbe(msg->predict_time);
+    predict_value  = unpack754(intrev64ifbe(msg->predict_value), 64, 11);
+    predict_change = unpack754(intrev64ifbe(msg->predict_change), 64, 11);
+
+    cntr = counterLookup(name);
+    if (cntr == NULL) {
+        cntr = counterCreate(name);
+    } else {
+        /* Loop through the replica list, summing all values
+           and looking for our own replica. */
+        listRewind(cntr->replicas,&li);
+        while ((ln = listNext(&li)) != NULL) {
+            repl = listNodeValue(ln);
+
+            if (repl->node == node) {
+                break;
+            }
+        }
+    }
+
+    if ((repl == NULL) || (repl->node != node)) {
+        repl = zmalloc(sizeof(replica));
+        repl->node = node;
+
+        memcpy(repl->node_name,node->name,DISCNT_CLUSTER_NAMELEN);
+
+        listAddNodeTail(cntr->replicas, repl);
+    }
+
+    repl->value = predict_value;
+    repl->predict_time   = predict_time;
+    repl->predict_value  = predict_value;
+    repl->predict_change = predict_change;
+
+    sdsfree(name);
 }

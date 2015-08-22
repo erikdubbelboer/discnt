@@ -1,8 +1,6 @@
 #ifndef __DISCNT_CLUSTER_H
 #define __DISCNT_CLUSTER_H
 
-#include "counter.h"
-
 /*-----------------------------------------------------------------------------
  * Discnt cluster data structures, defines, exported API.
  *----------------------------------------------------------------------------*/
@@ -44,6 +42,7 @@ typedef struct clusterLink {
 #define nodeWithoutAddr(n) ((n)->flags & DISCNT_NODE_NOADDR)
 #define nodeTimedOut(n) ((n)->flags & DISCNT_NODE_PFAIL)
 #define nodeFailed(n) ((n)->flags & DISCNT_NODE_FAIL)
+#define nodeDeleted(n) ((n)->flags & DISCNT_NODE_DELETED)
 
 /* This structure represent elements of node->fail_reports. */
 typedef struct clusterNodeFailReport {
@@ -93,10 +92,11 @@ typedef struct clusterState {
  * kind of packet. PONG is the reply to ping, in the exact format as a PING,
  * while MEET is a special PING that forces the receiver to add the sender
  * as a node (if it is not already in the list). */
-#define CLUSTERMSG_TYPE_PING 0          /* Ping. */
-#define CLUSTERMSG_TYPE_PONG 1          /* Reply to Ping. */
-#define CLUSTERMSG_TYPE_MEET 2          /* Meet "let's join" message. */
-#define CLUSTERMSG_TYPE_FAIL 3          /* Mark node xxx as failing. */
+#define CLUSTERMSG_TYPE_PING 0     /* Ping. */
+#define CLUSTERMSG_TYPE_PONG 1     /* Reply to Ping. */
+#define CLUSTERMSG_TYPE_MEET 2     /* Meet "let's join" message. */
+#define CLUSTERMSG_TYPE_FAIL 3     /* Mark node xxx as failing. */
+#define CLUSTERMSG_TYPE_COUNTER 4  /* A counter. */
 
 /* Initially we don't know our "name", but we'll find it once we connect
  * to the first node, using the getsockname() function. Then we'll use this
@@ -116,6 +116,18 @@ typedef struct {
     char nodename[DISCNT_CLUSTER_NAMELEN];
 } clusterMsgDataFail;
 
+typedef struct {
+    uint32_t after;
+} clusterMsgDataUpdate;
+
+typedef struct {
+    uint64_t predict_time;
+    uint64_t predict_value;
+    uint64_t predict_change;
+    uint16_t name_length;  /* Length of name. */
+    unsigned char name[2]; /* Defined as 2 bytes just for alignment. */
+} clusterMsgDataCounter;
+
 union clusterMsgData {
     /* PING, MEET and PONG. */
     struct {
@@ -127,6 +139,11 @@ union clusterMsgData {
     struct {
         clusterMsgDataFail about;
     } fail;
+
+    /* COUNTER. */
+    struct {
+        clusterMsgDataCounter repl;
+    } counter;
 };
 
 #define CLUSTER_PROTO_VER 0 /* Cluster bus protocol version. */
@@ -148,10 +165,6 @@ typedef struct {
 } clusterMsg;
 
 #define CLUSTERMSG_MIN_LEN (sizeof(clusterMsg)-sizeof(union clusterMsgData))
-
-/* Message flags better specify the packet content or are used to
- * provide some information about the node state. */
-#define CLUSTERMSG_FLAG0_NOREPLY (1<<0) /* Don't reply to this message. */
 
 /*-----------------------------------------------------------------------------
  * Exported API.

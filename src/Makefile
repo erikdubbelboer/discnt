@@ -115,8 +115,10 @@ DISCNT_SERVER_NAME=discnt-server
 DISCNT_SERVER_OBJ=adlist.o ae.o anet.o dict.o discnt.o sds.o zmalloc.o lzf_c.o lzf_d.o sha1.o release.o networking.o util.o object.o config.o debug.o syncio.o cluster.o crc16.o endianconv.o bio.o memtest.o crc64.o setproctitle.o blocked.o latency.o sparkline.o counter.o skiplist.o
 DISCNT_CLI_NAME=discnt-cli
 DISCNT_CLI_OBJ=anet.o sds.o adlist.o discnt-cli.o zmalloc.o release.o anet.o ae.o crc64.o
+DISCNT_BENCHMARK_NAME=discnt-benchmark
+DISCNT_BENCHMARK_OBJ=ae.o anet.o discnt-benchmark.o adlist.o zmalloc.o
 
-all: $(DISCNT_SERVER_NAME) $(DISCNT_CLI_NAME)
+all: $(DISCNT_SERVER_NAME) $(DISCNT_CLI_NAME) $(DISCNT_BENCHMARK_NAME)
 	@echo ""
 	@echo "Hint: It's a good idea to run 'make test' ;)"
 	@echo ""
@@ -167,6 +169,10 @@ $(DISCNT_SERVER_NAME): $(DISCNT_SERVER_OBJ)
 $(DISCNT_CLI_NAME): $(DISCNT_CLI_OBJ)
 	$(DISCNT_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/linenoise/linenoise.o $(FINAL_LIBS)
 
+# discnt-benchmark
+$(DISCNT_BENCHMARK_NAME): $(DISCNT_BENCHMARK_OBJ)
+	$(DISCNT_LD) -o $@ $^ ../deps/hiredis/libhiredis.a $(FINAL_LIBS)
+
 # Because the jemalloc.h header is generated as a part of the jemalloc build,
 # building it should complete before building any other object. Instead of
 # depending on a single artifact, build all dependencies first.
@@ -174,7 +180,7 @@ $(DISCNT_CLI_NAME): $(DISCNT_CLI_OBJ)
 	$(DISCNT_CC) -c $<
 
 clean:
-	rm -rf $(DISCNT_SERVER_NAME) $(DISCNT_CLI_NAME) *.o *.gcda *.gcno *.gcov discnt.info lcov-html
+	rm -rf $(DISCNT_SERVER_NAME) $(DISCNT_CLI_NAME) $(DISCNT_BENCHMARK_NAME) *.o *.gcda *.gcno *.gcov discnt.info lcov-html
 
 .PHONY: clean
 
@@ -218,4 +224,4 @@ src/help.h:
 install: all
 	@mkdir -p $(INSTALL_BIN)
 	$(DISCNT_INSTALL) $(DISCNT_SERVER_NAME) $(INSTALL_BIN)
-	$(DISCNT_INSTALL) $(DISCNT_CLI_NAME) $(INSTALL_BIN)
+	$(DISCNT_INSTALL) $(DISCNT_CLI_NAME) $(DISCNT_BENCHMARK_NAME) $(INSTALL_BIN)

@@ -84,6 +84,8 @@ typedef long long mstime_t; /* millisecond time type. */
 #define DISCNT_SHARED_BULKHDR_LEN 32
 #define DISCNT_MAX_LOGMSG_LEN    1024 /* Default maximum length of syslog messages */
 #define DISCNT_MAX_CLIENTS 10000
+#define DISCNT_HISTORY 10
+#define DISCNT_PRECISION 0.1
 #define DISCNT_AUTHPASS_MAX_LEN 512
 #define DISCNT_DEFAULT_SLAVE_PRIORITY 100
 #define DISCNT_REPL_TIMEOUT 60
@@ -187,8 +189,6 @@ typedef long long mstime_t; /* millisecond time type. */
 /* Client block type (btype field in client structure)
  * if DISCNT_BLOCKED flag is set. */
 #define DISCNT_BLOCKED_NONE 0    /* Not blocked, no DISCNT_BLOCKED flag set. */
-#define DISCNT_BLOCKED_JOB_REPL 1 /* Wait job synchronous replication. */
-#define DISCNT_BLOCKED_QUEUES 2   /* Wait for new jobs in a set of queues. */
 
 /* Client request types */
 #define DISCNT_REQ_INLINE 1
@@ -271,8 +271,6 @@ typedef struct discntObject {
     _var.ptr = _ptr; \
 } while(0);
 
-struct job;
-
 /* This structure holds the blocking operation state for a client.
  * The fields used depend on client->btype. */
 typedef struct blockingState {
@@ -281,11 +279,7 @@ typedef struct blockingState {
                              * is > timeout then the operation timed out. */
 
     /* DISCNT_BLOCKED_JOB_REPL */
-    struct job *job;        /* Job we are trying to replicate. */
     mstime_t added_node_time; /* Last time we added a new node. */
-
-    /* DISCNT_BLOCKED_QUEUES */
-    dict *queues;           /* Queues we are waiting for. */
 } blockingState;
 
 /* With multiplexing we need to take per-client state.
@@ -410,10 +404,8 @@ struct discntServer {
     client *current_client; /* Current client, only used on crash report */
     int clients_paused;         /* True if clients are currently paused */
     mstime_t clients_pause_end_time; /* Time when we undo clients_paused */
-    char neterr[ANET_ERR_LEN];   /* Error buffer for anet.c */
+    char neterr[ANET_ERR_LEN];  /* Error buffer for anet.c */
     uint64_t next_client_id;    /* Next client unique ID. Incremental. */
-    /* Jobs & Queues */
-    dict *counters;                 /* Main counter hash table, by job ID. */
     /* AOF loading information */
     int loading;                /* We are loading data from disk if true */
     off_t loading_total_bytes;
@@ -459,6 +451,11 @@ struct discntServer {
     /* Limits */
     unsigned int maxclients;            /* Max number of simultaneous clients */
     unsigned long long maxmemory;   /* Max number of memory bytes to use */
+    /* Jobs & Queues */
+    dict *counters;             /* Main counter hash table, by counter ID. */
+    double precision;           /* Desired prediction precision. */
+    unsigned int history_size;
+    unsigned int history_index;
     /* Blocked clients */
     unsigned int bpop_blocked_clients; /* Number of clients blocked by lists */
     list *unblocked_clients; /* list of clients to unblock before next loop */
@@ -667,6 +664,7 @@ int collateStringObjects(robj *a, robj *b);
 int equalStringObjects(robj *a, robj *b);
 int parseScanCursorOrReply(client *c, robj *o, unsigned long *cursor);
 #define sdsEncodedObject(objptr) (objptr->encoding == DISCNT_ENCODING_RAW || objptr->encoding == DISCNT_ENCODING_EMBSTR)
+void dictCounterDestructor(void *privdata, void *val);
 
 /* Synchronous I/O with timeout */
 ssize_t syncWrite(int fd, char *ptr, ssize_t size, long long timeout);
@@ -723,6 +721,10 @@ void clusterInit(void);
 unsigned short crc16(const char *buf, int len);
 void clusterCron(void);
 void clusterBeforeSleep(void);
+void clusterSendUpdate(mstime_t after);
+
+/* Counters */
+void countersCron(void);
 
 /* Blocked clients */
 void processUnblockedClients(void);
@@ -749,20 +751,9 @@ void clientCommand(client *c);
 void timeCommand(client *c);
 void commandCommand(client *c);
 void latencyCommand(client *c);
-void addjobCommand(client *c);
-void qlenCommand(client *c);
-void getjobCommand(client *c);
-void showCommand(client *c);
-void ackjobCommand(client *c);
-void fastackCommand(client *c);
-void enqueueCommand(client *c);
-void dequeueCommand(client *c);
-void loadjobCommand(client *c);
-void deljobCommand(client *c);
 void helloCommand(client *c);
-void qpeekCommand(client *c);
-void qscanCommand(client *c);
-void workingCommand(client *c);
+void incrCommand(client *c);
+void getCommand(client *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));

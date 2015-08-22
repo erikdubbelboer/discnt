@@ -65,4 +65,3 @@ test/include/test/jemalloc_test_defs.h
 /test/unit/*.gcda
 /test/unit/*.gcno
 /test/unit/*.out
-

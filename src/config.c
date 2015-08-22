@@ -197,6 +197,11 @@ void loadServerConfigFromString(char *config) {
             if (server.maxclients < 1) {
                 err = "Invalid max clients limit"; goto loaderr;
             }
+        } else if (!strcasecmp(argv[0],"precision") && argc == 2) {
+            server.precision = strtod(argv[1], NULL);
+            if (server.precision < 0) {
+                err = "Invalid precision"; goto loaderr;
+            }
         } else if (!strcasecmp(argv[0],"maxmemory") && argc == 2) {
             server.maxmemory = memtoll(argv[1],NULL);
             if (server.maxmemory <= 0) {
@@ -344,7 +349,8 @@ void loadServerConfig(char *filename, char *options) {
 
 void configSetCommand(client *c) {
     robj *o;
-    long long ll;
+    long long ll = 0;
+    long double ld = 0;
     serverAssertWithInfo(c,c->argv[2],sdsEncodedObject(c->argv[2]));
     serverAssertWithInfo(c,c->argv[3],sdsEncodedObject(c->argv[3]));
     o = c->argv[3];
@@ -386,6 +392,15 @@ void configSetCommand(client *c) {
                 }
             }
         }
+    } else if (!strcasecmp(c->argv[2]->ptr,"precision")) {
+        if (getLongDoubleFromObject(o,&ld) == DISCNT_ERR || ll < 1) goto badfmt;
+
+        if (ld < 0) {
+            addReplyErrorFormat(c,"Invalid precision");
+            return;
+        }
+
+        server.precision = ld;
     } else if (!strcasecmp(c->argv[2]->ptr,"hz")) {
         if (getLongLongFromObject(o,&ll) == DISCNT_ERR || ll < 0) goto badfmt;
         server.hz = ll;
@@ -518,6 +533,15 @@ badfmt: /* Bad format errors */
     } \
 } while(0);
 
+#define config_get_double_field(_name,_var) do { \
+    if (stringmatch(pattern,_name,0)) { \
+        d2string(buf,sizeof(buf),_var); \
+        addReplyBulkCString(c,_name); \
+        addReplyBulkCString(c,buf); \
+        matches++; \
+    } \
+} while(0);
+
 void configGetCommand(client *c) {
     robj *o = c->argv[2];
     void *replylen = addDeferredMultiBulkLength(c);
@@ -542,6 +566,7 @@ void configGetCommand(client *c) {
     config_get_numerical_field("tcp-backlog",server.tcp_backlog);
     config_get_numerical_field("databases",server.dbnum);
     config_get_numerical_field("maxclients",server.maxclients);
+    config_get_double_field("precision",server.precision);
     config_get_numerical_field("watchdog-period",server.watchdog_period);
     config_get_numerical_field("hz",server.hz);
     config_get_numerical_field("cluster-node-timeout",server.cluster_node_timeout);
@@ -862,6 +887,14 @@ void rewriteConfigNumericalOption(struct rewriteConfigState *state, char *option
     rewriteConfigRewriteLine(state,option,line,force);
 }
 
+/* Rewrite a numerical (double range) option. */
+void rewriteConfigDoubleOption(struct rewriteConfigState *state, char *option, double value, double defvalue) {
+    int force = value != defvalue;
+    sds line = sdscatprintf(sdsempty(),"%s %f",option,value);
+
+    rewriteConfigRewriteLine(state,option,line,force);
+}
+
 /* Rewrite a octal option. */
 void rewriteConfigOctalOption(struct rewriteConfigState *state, char *option, int value, int defvalue) {
     int force = value != defvalue;
@@ -1134,6 +1167,7 @@ int rewriteConfig(char *path) {
     rewriteConfigDirOption(state);
     rewriteConfigStringOption(state,"requirepass",server.requirepass,NULL);
     rewriteConfigNumericalOption(state,"maxclients",server.maxclients,DISCNT_MAX_CLIENTS);
+    rewriteConfigDoubleOption(state,"precision",server.precision,1);
     rewriteConfigBytesOption(state,"maxmemory",server.maxmemory,DISCNT_DEFAULT_MAXMEMORY);
     rewriteConfigStringOption(state,"cluster-config-file",server.cluster_configfile,DISCNT_DEFAULT_CLUSTER_CONFIG_FILE);
     rewriteConfigNumericalOption(state,"cluster-node-timeout",server.cluster_node_timeout,DISCNT_CLUSTER_DEFAULT_NODE_TIMEOUT);

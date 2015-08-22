@@ -11,7 +11,7 @@ blocked.o: blocked.c discnt.h fmacros.h config.h ae.h sds.h dict.h \
   sparkline.h counter.h
 cluster.o: cluster.c discnt.h fmacros.h config.h ae.h sds.h dict.h \
   adlist.h skiplist.h zmalloc.h anet.h version.h util.h latency.h \
-  sparkline.h cluster.h counter.h endianconv.h
+  sparkline.h cluster.h endianconv.h
 config.o: config.c discnt.h fmacros.h config.h ae.h sds.h dict.h adlist.h \
   skiplist.h zmalloc.h anet.h version.h util.h latency.h sparkline.h \
   cluster.h counter.h
