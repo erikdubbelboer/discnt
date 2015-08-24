@@ -724,7 +724,8 @@ void clusterBeforeSleep(void);
 void clusterSendUpdate(mstime_t after);
 
 /* Counters */
-void countersCron(void);
+void countersHistoryCron(void);
+void countersValueCron(void);
 
 /* Blocked clients */
 void processUnblockedClients(void);

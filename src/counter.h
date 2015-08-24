@@ -42,7 +42,6 @@ typedef struct replica {
      * For other replicas this is our last prediction of the value.
      */
     long double value;
-    long double *history; /* History of this replica per second for server.history_size seconds. */
 
     mstime_t    predict_time;   /* Time we made the last prediction. */
     long double predict_value;  /* Value at the last prediction. */
@@ -53,8 +52,14 @@ typedef struct replica {
 typedef struct counter {
     sds      name;
     list     *replicas;
+    replica  *myrepl;
 
-    long double value; /* Cached value. */
+    long double value;    /* Cached value. */
+    long double *history; /* History of this counter per second for server.history_size seconds. */
+
+    uint32_t revision;
+    dict     *acks;
+    mstime_t updated;
 } counter;
 
 
@@ -66,6 +71,5 @@ counter *counterLookup(sds name);
 counter *counterCreate(sds name);
 void countersAddNode(clusterNode *node);
 void countersNodeFail(clusterNode *node);
-void clusterSendReplica(sds name, replica* repl);
 
 #endif

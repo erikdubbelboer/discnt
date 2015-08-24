@@ -97,6 +97,7 @@ typedef struct clusterState {
 #define CLUSTERMSG_TYPE_MEET 2     /* Meet "let's join" message. */
 #define CLUSTERMSG_TYPE_FAIL 3     /* Mark node xxx as failing. */
 #define CLUSTERMSG_TYPE_COUNTER 4  /* A counter. */
+#define CLUSTERMSG_TYPE_ACK 5      /* Ack. */
 
 /* Initially we don't know our "name", but we'll find it once we connect
  * to the first node, using the getsockname() function. Then we'll use this
@@ -124,9 +125,16 @@ typedef struct {
     uint64_t predict_time;
     uint64_t predict_value;
     uint64_t predict_change;
+    uint32_t revision;
     uint16_t name_length;  /* Length of name. */
     unsigned char name[2]; /* Defined as 2 bytes just for alignment. */
 } clusterMsgDataCounter;
+
+typedef struct {
+    uint32_t revision;
+    uint16_t name_length;  /* Length of name. */
+    unsigned char name[2]; /* Defined as 2 bytes just for alignment. */
+} clusterMsgDataAck;
 
 union clusterMsgData {
     /* PING, MEET and PONG. */
@@ -144,6 +152,11 @@ union clusterMsgData {
     struct {
         clusterMsgDataCounter repl;
     } counter;
+
+    /* ACK. */
+    struct {
+        clusterMsgDataAck about;
+    } ack;
 };
 
 #define CLUSTER_PROTO_VER 0 /* Cluster bus protocol version. */
@@ -174,5 +187,10 @@ extern clusterNode *myself;
 
 clusterNode *clusterLookupNode(char *name);
 void clusterUpdateReachableNodes(void);
+
+struct counter;
+
+void clusterSendReplicaToNode(struct counter* cntr, clusterNode *node);
+void clusterSendReplica(struct counter* cntr);
 
 #endif /* __DISCNT_CLUSTER_H */

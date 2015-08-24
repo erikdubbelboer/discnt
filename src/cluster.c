@@ -68,6 +68,8 @@ sds representDiscntNodeFlags(sds ci, uint16_t flags);
 void clusterBuildMessageHdr(clusterMsg *hdr, int type);
 void clusterSendMessage(clusterLink *link, unsigned char *msg, size_t msglen);
 void cluserReadReplica(clusterMsgDataCounter *msg, clusterNode *node);
+void clusterSendAck(clusterNode *node, uint32_t revision, sds name);
+void cluserReadAck(clusterMsgDataAck *msg, clusterNode *node);
 
 /* -----------------------------------------------------------------------------
  * Initialization
@@ -1103,6 +1105,13 @@ int clusterProcessPacket(clusterLink *link) {
                   sizeof(hdr->data.counter.repl.name);
         explen += intrev16ifbe(hdr->data.counter.repl.name_length);
         if (totlen != explen) return 1;
+    } else if (type == CLUSTERMSG_TYPE_ACK) {
+        uint32_t explen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
+
+        explen += sizeof(clusterMsgDataAck) -
+                  sizeof(hdr->data.ack.about.name);
+        explen += intrev16ifbe(hdr->data.ack.about.name_length);
+        if (totlen != explen) return 1;
     }
 
     /* Check if the sender is a known node. */
@@ -1266,6 +1275,10 @@ int clusterProcessPacket(clusterLink *link) {
         if (!sender) return 1;
 
         cluserReadReplica(&hdr->data.counter.repl, sender);
+    } else if (type == CLUSTERMSG_TYPE_ACK) {
+        if (!sender) return 1;
+
+        cluserReadAck(&hdr->data.ack.about, sender);
     } else {
         serverLog(DISCNT_WARNING,"Received unknown packet type: %d", type);
     }
@@ -2090,10 +2103,8 @@ void helloCommand(client *c) {
  * CLUSTER counters
  * -------------------------------------------------------------------------- */
 
-void clusterSendReplica(sds name, replica* repl) {
-    clusterNode *node;
-    int i;
-    unsigned char buf[sizeof(clusterMsg) + 32], *payload;
+void clusterSendReplicaToNode(counter *cntr, clusterNode *node) {
+    unsigned char buf[sizeof(clusterMsg) + 64], *payload;
     clusterMsg *hdr = (clusterMsg*) buf;
     uint32_t totlen;
 
@@ -2103,15 +2114,16 @@ void clusterSendReplica(sds name, replica* repl) {
 
     totlen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
     totlen += sizeof(clusterMsgDataCounter) - sizeof(hdr->data.counter.repl.name);
-    totlen += sdslen(name);
+    totlen += sdslen(cntr->name);
 
     clusterBuildMessageHdr(hdr,CLUSTERMSG_TYPE_COUNTER);
     hdr->totlen = htonl(totlen);
 
-    hdr->data.counter.repl.predict_time = intrev64ifbe(repl->predict_time);
-    hdr->data.counter.repl.predict_value = intrev64ifbe(pack754(repl->predict_value, 64, 11));
-    hdr->data.counter.repl.predict_change = intrev64ifbe(pack754(repl->predict_change, 64, 11));
-    hdr->data.counter.repl.name_length = intrev16ifbe(sdslen(name));
+    hdr->data.counter.repl.revision       = intrev32ifbe(cntr->revision);
+    hdr->data.counter.repl.predict_time   = intrev64ifbe(cntr->myrepl->predict_time);
+    hdr->data.counter.repl.predict_value  = intrev64ifbe(pack754(cntr->myrepl->predict_value, 64, 11));
+    hdr->data.counter.repl.predict_change = intrev64ifbe(pack754(cntr->myrepl->predict_change, 64, 11));
+    hdr->data.counter.repl.name_length    = intrev16ifbe(sdslen(cntr->name));
 
     if (totlen < sizeof(buf)) {
         payload = buf;
@@ -2121,23 +2133,43 @@ void clusterSendReplica(sds name, replica* repl) {
         hdr = (clusterMsg*) payload;
     }
 
-    memcpy(hdr->data.counter.repl.name, name, sdslen(name));
+    memcpy(hdr->data.counter.repl.name, cntr->name, sdslen(cntr->name));
 
-    for (i = 0; i < server.cluster->reachable_nodes_count; i++) {
-        node = server.cluster->reachable_nodes[i];
-
-        if (node->link == NULL) continue;
-
-        clusterSendMessage(node->link,payload,totlen);
-    }
+    clusterSendMessage(node->link,payload,totlen);
 
     if (totlen >= sizeof(buf)) {
         zfree(payload);
     }
 }
 
+void clusterSendReplica(counter *cntr) {
+    int retval;
+    dictIterator *di;
+    dictEntry *de;
+    clusterNode *node;
+
+    if (cntr->acks == NULL) {
+        cntr->acks = dictCreate(&clusterNodesDictType, NULL);
+    } else {
+        dictEmpty(cntr->acks, NULL);
+    }
+
+    di = dictGetIterator(server.cluster->nodes);
+    while((de = dictNext(di)) != NULL) {
+        node = dictGetVal(de);
+
+        retval = dictAdd(cntr->acks, node->name, NULL);
+        serverAssert(retval == 0);
+
+        if (node->link == NULL) continue;
+
+        clusterSendReplicaToNode(cntr, node);
+    }
+    dictReleaseIterator(di);
+}
+
 void cluserReadReplica(clusterMsgDataCounter *msg, clusterNode *node) {
-    uint32_t name_length;
+    uint32_t name_length, revision;
     mstime_t predict_time;
     long double predict_value, predict_change;
     sds name;
@@ -2149,6 +2181,7 @@ void cluserReadReplica(clusterMsgDataCounter *msg, clusterNode *node) {
     name_length = intrev16ifbe(msg->name_length);
     name = sdsnewlen(msg->name,name_length);
 
+    revision       = intrev32ifbe(msg->revision);
     predict_time   = intrev64ifbe(msg->predict_time);
     predict_value  = unpack754(intrev64ifbe(msg->predict_value), 64, 11);
     predict_change = unpack754(intrev64ifbe(msg->predict_change), 64, 11);
@@ -2157,8 +2190,6 @@ void cluserReadReplica(clusterMsgDataCounter *msg, clusterNode *node) {
     if (cntr == NULL) {
         cntr = counterCreate(name);
     } else {
-        /* Loop through the replica list, summing all values
-           and looking for our own replica. */
         listRewind(cntr->replicas,&li);
         while ((ln = listNext(&li)) != NULL) {
             repl = listNodeValue(ln);
@@ -2172,7 +2203,6 @@ void cluserReadReplica(clusterMsgDataCounter *msg, clusterNode *node) {
     if ((repl == NULL) || (repl->node != node)) {
         repl = zmalloc(sizeof(replica));
         repl->node = node;
-        repl->history = NULL;
 
         memcpy(repl->node_name,node->name,DISCNT_CLUSTER_NAMELEN);
 
@@ -2184,5 +2214,55 @@ void cluserReadReplica(clusterMsgDataCounter *msg, clusterNode *node) {
     repl->predict_value  = predict_value;
     repl->predict_change = predict_change;
 
+    clusterSendAck(node, revision, name);
+
     sdsfree(name);
 }
+
+void clusterSendAck(clusterNode *node, uint32_t revision, sds name) {
+    unsigned char buf[sizeof(clusterMsg) + 64], *payload;
+    clusterMsg *hdr = (clusterMsg*) buf;
+    uint32_t totlen;
+
+    totlen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
+    totlen += sizeof(clusterMsgDataAck) - sizeof(hdr->data.ack.about.name);
+    totlen += sdslen(name);
+
+    clusterBuildMessageHdr(hdr,CLUSTERMSG_TYPE_ACK);
+    hdr->totlen = htonl(totlen);
+
+    hdr->data.ack.about.revision    = intrev32ifbe(revision);
+    hdr->data.ack.about.name_length = intrev16ifbe(sdslen(name));
+
+    if (totlen < sizeof(buf)) {
+        payload = buf;
+    } else {
+        payload = zmalloc(totlen);
+        memcpy(payload,buf,sizeof(clusterMsg));
+        hdr = (clusterMsg*) payload;
+    }
+
+    memcpy(hdr->data.ack.about.name, name, sdslen(name));
+
+    clusterSendMessage(node->link,payload,totlen);
+}
+
+void cluserReadAck(clusterMsgDataAck *msg, clusterNode *node) {
+    uint32_t name_length, revision;
+    sds name;
+    counter *cntr;
+
+    name_length = intrev16ifbe(msg->name_length);
+    name = sdsnewlen(msg->name,name_length);
+
+    revision = intrev32ifbe(msg->revision);
+
+    cntr = counterLookup(name);
+    if (cntr != NULL) {
+        dictDelete(cntr->acks, node->name);
+        if (htNeedsResize(cntr->acks)) dictResize(cntr->acks);
+    }
+
+    sdsfree(name);
+}
+

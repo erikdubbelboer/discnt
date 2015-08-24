@@ -34,14 +34,14 @@
 #include <math.h>
 
 
-void replicaUpdateHistory(replica *repl) {
-    repl->history[server.history_index] = repl->value;
+void counterUpdateHistory(counter *cntr) {
+    cntr->history[server.history_index] = cntr->myrepl->value;
 }
 
-void replicaPredict(replica *repl, mstime_t now) {
-    repl->predict_time   = now;
-    repl->predict_value  = repl->value;
-    repl->predict_change = (repl->value - repl->history[server.history_index]) / ((long double)server.history_size * 1000.0);
+void counterPredict(counter *cntr, mstime_t now) {
+    cntr->myrepl->predict_time   = now;
+    cntr->myrepl->predict_value  = cntr->myrepl->value;
+    cntr->myrepl->predict_change = (cntr->myrepl->value - cntr->history[server.history_index]) / ((long double)server.history_size * 1000.0);
 }
 
 void dictCounterDestructor(void *privdata, void *val) {
@@ -49,18 +49,21 @@ void dictCounterDestructor(void *privdata, void *val) {
     counter* cntr = val;
     listNode *ln;
     listIter li;
-    replica* repl;
 
     if (val == NULL) return; /* Values of swapped out keys as set to NULL */
 
     listRewind(cntr->replicas,&li);
     while ((ln = listNext(&li)) != NULL) {
-        repl = listNodeValue(ln);
+        replica *repl = listNodeValue(ln);
 
         zfree(repl);
     }
 
     listRelease(cntr->replicas);
+
+    if (cntr->acks) dictEmpty(cntr->acks,NULL);
+
+    /* cntr->name will be freed by the dict code. */
 }
 
 counter *counterLookup(sds name) {
@@ -73,13 +76,22 @@ counter *counterLookup(sds name) {
 }
 
 counter *counterCreate(sds name) {
-    counter *cntr = zmalloc(sizeof(counter));
-    cntr->name = sdsdup(name);
+    int retval;
+
+    counter *cntr = zmalloc(sizeof(counter) + (sizeof(long double) * server.history_size));
+    cntr->name     = sdsdup(name);
     cntr->replicas = listCreate();
-    cntr->value = 0;
+    cntr->myrepl   = NULL;
+    cntr->value    = 0;
+    cntr->revision = 0;
+    cntr->acks     = NULL;
+    cntr->updated  = 0;
 
-    int retval = dictAdd(server.counters, cntr->name, cntr);
+    cntr->history = (long double*)(cntr + 1);
+        
+    memset(cntr->history, 0, sizeof(long double)*server.history_size);
 
+    retval = dictAdd(server.counters, cntr->name, cntr);
     serverAssert(retval == 0);
 
     return cntr;
@@ -87,9 +99,7 @@ counter *counterCreate(sds name) {
 
 void incrCommand(client *c) {
     long double increment;
-    listNode *ln;
     counter *cntr;
-    replica *repl = NULL;
     robj *new;
 
     if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != DISCNT_OK)
@@ -98,32 +108,21 @@ void incrCommand(client *c) {
     cntr = counterLookup(c->argv[1]->ptr);
     if (cntr == NULL) {
         cntr = counterCreate(c->argv[1]->ptr);
-    } else if (listLength(cntr->replicas) > 0) {
-        ln = listFirst(cntr->replicas);
-        repl = listNodeValue(ln);
-
-        if (repl->node != myself) {
-            repl = NULL;
-        }
     }
 
-    if (repl == NULL) {
-        repl = zmalloc(sizeof(replica) + sizeof(long double)*server.history_size);
-        repl->node = myself;
-        repl->value = increment;
-        repl->predict_time   = 0;
-        repl->predict_value  = 0;
-        repl->predict_change = 0;
+    if (cntr->myrepl == NULL) {
+        cntr->myrepl = zmalloc(sizeof(replica));
+        cntr->myrepl->node = myself;
+        cntr->myrepl->value = increment;
+        cntr->myrepl->predict_time   = 0;
+        cntr->myrepl->predict_value  = 0;
+        cntr->myrepl->predict_change = 0;
 
-        repl->history = (long double*)(repl + 1);
+        memcpy(cntr->myrepl->node_name,myself->name,DISCNT_CLUSTER_NAMELEN);
 
-        memset(repl->history, 0, sizeof(long double)*server.history_size);
-
-        memcpy(repl->node_name,myself->name,DISCNT_CLUSTER_NAMELEN);
-
-        listAddNodeHead(cntr->replicas, repl);
+        listAddNodeTail(cntr->replicas, cntr->myrepl);
     } else {
-        repl->value += increment;
+        cntr->myrepl->value += increment;
     }
 
     cntr->value += increment;
@@ -199,6 +198,25 @@ void countersNodeFail(clusterNode *node) {
     dictReleaseIterator(it);
 }
 
+void counterMaybeResend(counter *cntr) {
+    int i;
+    clusterNode *node;
+
+    if (dictSize(cntr->acks) == 0) {
+        return;
+    }
+
+    for (i = 0; i < server.cluster->reachable_nodes_count; i++) {
+        node = server.cluster->reachable_nodes[i];
+
+        if (node->link == NULL) continue;
+
+        if (dictFind(cntr->acks, node->name) != NULL) {
+            clusterSendReplicaToNode(cntr, node);
+        }
+    }
+}
+
 /* -----------------------------------------------------------------------------
  * COUNTERS cron job
  * -------------------------------------------------------------------------- */
@@ -215,32 +233,31 @@ void countersHistoryCron(void) {
     while ((de = dictNext(it)) != NULL) {
         long double rvalue, elapsed;
         counter *cntr;
-        listNode *ln;
-        replica *repl;
 
         cntr = dictGetVal(de);
 
-        ln   = listFirst(cntr->replicas);
-        repl = listNodeValue(ln);
-
-        if (repl->node != myself) {
+        if (cntr->myrepl == NULL) {
             continue;
         }
 
-        replicaUpdateHistory(repl);
+        counterUpdateHistory(cntr);
 
-        if (repl->predict_time > 0) {
-            elapsed = (now - repl->predict_time);
-            rvalue = repl->predict_value + (elapsed * repl->predict_change);
+        if (cntr->myrepl->predict_time > 0) {
+            elapsed = (now - cntr->myrepl->predict_time);
+            rvalue = cntr->myrepl->predict_value + (elapsed * cntr->myrepl->predict_change);
 
-            if (fabs((double)(rvalue - repl->value)) <= server.precision) {
-                continue;
+            if (fabs((double)(rvalue - cntr->myrepl->value)) <= server.precision) {
+                /* It's still up to date, check if we need to resend our last prediction. */
+                counterMaybeResend(cntr);
             }
         }
 
-        replicaPredict(repl, now);
+        /* New prediction. */
+        cntr->revision++;
 
-        clusterSendReplica(cntr->name, repl);
+        counterPredict(cntr, now);
+
+        clusterSendReplica(cntr);
     }
     dictReleaseIterator(it);
 }
@@ -265,7 +282,7 @@ void countersValueCron(void) {
         while ((ln = listNext(&li)) != NULL) {
             repl = listNodeValue(ln);
 
-            if (repl->node == myself) {
+            if (repl == cntr->myrepl) {
                 value += repl->value;
                 continue;
             }
