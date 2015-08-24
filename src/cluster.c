@@ -2259,8 +2259,16 @@ void cluserReadAck(clusterMsgDataAck *msg, clusterNode *node) {
 
     cntr = counterLookup(name);
     if (cntr != NULL) {
-        dictDelete(cntr->acks, node->name);
-        if (htNeedsResize(cntr->acks)) dictResize(cntr->acks);
+        if (cntr->revision == revision) {
+            dictDelete(cntr->acks, node->name);
+            if (htNeedsResize(cntr->acks)) dictResize(cntr->acks);
+        } else {
+            serverLog(DISCNT_VERBOSE,"Ack from %.40s for invalid revision %u of %s at %u",
+                node->name, revision, name, cntr->revision);
+        }
+    } else {
+        serverLog(DISCNT_VERBOSE,"Ack from %.40s for unknown counter %s",
+            node->name, name);
     }
 
     sdsfree(name);

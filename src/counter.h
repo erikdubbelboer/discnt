@@ -60,6 +60,9 @@ typedef struct counter {
     uint32_t revision;
     dict     *acks;
     mstime_t updated;
+
+    long long hits;
+    long long misses;
 } counter;
 
 

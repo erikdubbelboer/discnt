@@ -79,17 +79,13 @@ counter *counterCreate(sds name) {
     int retval;
 
     counter *cntr = zmalloc(sizeof(counter) + (sizeof(long double) * server.history_size));
+
+    memset(cntr, 0, sizeof(counter) + (sizeof(long double) * server.history_size));
+
     cntr->name     = sdsdup(name);
     cntr->replicas = listCreate();
-    cntr->myrepl   = NULL;
-    cntr->value    = 0;
-    cntr->revision = 0;
-    cntr->acks     = NULL;
-    cntr->updated  = 0;
 
     cntr->history = (long double*)(cntr + 1);
-        
-    memset(cntr->history, 0, sizeof(long double)*server.history_size);
 
     retval = dictAdd(server.counters, cntr->name, cntr);
     serverAssert(retval == 0);
@@ -249,11 +245,15 @@ void countersHistoryCron(void) {
             if (fabs((double)(rvalue - cntr->myrepl->value)) <= server.precision) {
                 /* It's still up to date, check if we need to resend our last prediction. */
                 counterMaybeResend(cntr);
+
+                cntr->hits++;
             }
         }
 
         /* New prediction. */
         cntr->revision++;
+
+        cntr->misses++;
 
         counterPredict(cntr, now);
 

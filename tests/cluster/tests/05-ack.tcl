@@ -11,7 +11,7 @@ test "Predictions will not ack" {
         fail "Killed nodes not flagged with FAIL flag after some time"
     }
 
-    set e [D 1 incr test 1.0]
+    set v [D 1 incr test 1.0]
 }
 
 test "Restarting node" {
@@ -27,7 +27,7 @@ test "Prediction should be resend" {
 
     after 1100
 
-    set e [D 2 get test]
-    assert {$e <= 1.25}
-    assert {$e >= 1.0 }
+    set v [D 2 get test]
+    assert {$v <= 1.25}
+    assert {$v >= 1.0 }
 }

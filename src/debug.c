@@ -85,6 +85,22 @@ void debugCommand(client *c) {
         sizes = sdscatprintf(sizes,"counter:%d ", (int)sizeof(counter));
         sizes = sdscatprintf(sizes,"sdshdr:%d", (int)sizeof(struct sdshdr));
         addReplyBulkSds(c,sizes);
+    } else if (!strcasecmp(c->argv[1]->ptr,"hits") && c->argc == 3) {
+        counter *cntr = counterLookup(c->argv[2]->ptr);
+
+        if (cntr == NULL) {
+            addReplyLongLong(c, 0);
+        } else {
+            addReplyLongLong(c, cntr->hits);
+        }
+    } else if (!strcasecmp(c->argv[1]->ptr,"misses") && c->argc == 3) {
+        counter *cntr = counterLookup(c->argv[2]->ptr);
+
+        if (cntr == NULL) {
+            addReplyLongLong(c, 0);
+        } else {
+            addReplyLongLong(c, cntr->misses);
+        }
     } else {
         addReplyErrorFormat(c, "Unknown DEBUG subcommand or wrong number of arguments for '%s'",
             (char*)c->argv[1]->ptr);
