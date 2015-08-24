@@ -150,7 +150,7 @@ union clusterMsgData {
 
     /* COUNTER. */
     struct {
-        clusterMsgDataCounter repl;
+        clusterMsgDataCounter shard;
     } counter;
 
     /* ACK. */
@@ -190,7 +190,7 @@ void clusterUpdateReachableNodes(void);
 
 struct counter;
 
-void clusterSendReplicaToNode(struct counter* cntr, clusterNode *node);
-void clusterSendReplica(struct counter* cntr);
+void clusterSendShardToNode(struct counter* cntr, clusterNode *node);
+void clusterSendShard(struct counter* cntr);
 
 #endif /* __DISCNT_CLUSTER_H */

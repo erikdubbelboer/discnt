@@ -84,7 +84,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define DISCNT_SHARED_BULKHDR_LEN 32
 #define DISCNT_MAX_LOGMSG_LEN    1024 /* Default maximum length of syslog messages */
 #define DISCNT_MAX_CLIENTS 10000
-#define DISCNT_PRECISION 0.1
+#define DISCNT_PRECISION 1
 #define DISCNT_HISTORY 10
 #define DISCNT_AUTHPASS_MAX_LEN 512
 #define DISCNT_DEFAULT_SLAVE_PRIORITY 100
@@ -420,12 +420,12 @@ struct discntServer {
     long long stat_numcommands;     /* Number of processed commands */
     long long stat_numconnections;  /* Number of connections received */
     size_t stat_peak_memory;        /* Max used memory record */
-    long long stat_fork_time;       /* Time needed to perform latest fork() */
-    double stat_fork_rate;          /* Fork rate in GB/sec. */
     long long stat_rejected_conn;   /* Clients rejected because of maxclients */
     size_t resident_set_size;       /* RSS sampled in serverCron(). */
     long long stat_net_input_bytes; /* Bytes read from network. */
     long long stat_net_output_bytes; /* Bytes written to network. */
+    long long stat_hits;
+    long long stat_misses;
     /* The following two are used to track instantaneous metrics, like
      * number of operations per second, network traffic. */
     struct {
@@ -455,7 +455,7 @@ struct discntServer {
     dict *counters;             /* Main counter hash table, by counter ID. */
     double precision;           /* Desired prediction precision. */
     unsigned int history_size;
-    unsigned int history_index;
+    int history_index;
     /* Blocked clients */
     unsigned int bpop_blocked_clients; /* Number of clients blocked by lists */
     list *unblocked_clients; /* list of clients to unblock before next loop */
@@ -594,11 +594,13 @@ void addReplyBulkCBuffer(client *c, void *p, size_t len);
 void addReplyBulkLongLong(client *c, long long ll);
 void addReply(client *c, robj *obj);
 void addReplySds(client *c, sds s);
+void addReplyString(client *c, char *s, size_t len);
 void addReplyBulkSds(client *c, sds s);
 void addReplyError(client *c, char *err);
 void addReplyStatus(client *c, char *status);
 void addReplyStatusLength(client *c, char *s, size_t len);
 void addReplyDouble(client *c, double d);
+void addReplyLongDouble(client *c, long double d);
 void addReplyLongLong(client *c, long long ll);
 void addReplyMultiBulkLen(client *c, long length);
 void copyClientOutputBuffer(client *dst, client *src);
@@ -755,6 +757,7 @@ void latencyCommand(client *c);
 void helloCommand(client *c);
 void incrCommand(client *c);
 void getCommand(client *c);
+void countersCommand(client *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));

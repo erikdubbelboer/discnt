@@ -189,7 +189,6 @@ void analyzeLatencyForEvent(char *event, struct latencyStats *ls) {
 /* Create a human readable report of latency events for this Discnt instance. */
 sds createLatencyReport(void) {
     sds report = sdsempty();
-    int advise_better_vm = 0;       /* Better virtual machines. */
     int advise_disk_contention = 0; /* Try to lower disk contention. */
     int advise_scheduler = 0;       /* Intrinsic latency. */
     int advise_data_writeback = 0;  /* data=writeback. */
@@ -236,27 +235,6 @@ sds createLatencyReport(void) {
             (double) ls.period/ls.samples,
             (unsigned long) ts->max);
 
-        /* Fork */
-        if (!strcasecmp(event,"fork")) {
-            char *fork_quality;
-            if (server.stat_fork_rate < 10) {
-                fork_quality = "terrible";
-                advise_better_vm = 1;
-                advices++;
-            } else if (server.stat_fork_rate < 25) {
-                fork_quality = "poor";
-                advise_better_vm = 1;
-                advices++;
-            } else if (server.stat_fork_rate < 100) {
-                fork_quality = "good";
-            } else {
-                fork_quality = "excellent";
-            }
-            report = sdscatprintf(report,
-                " Fork rate is %.2f GB/sec (%s).", server.stat_fork_rate,
-                fork_quality);
-        }
-
         /* Potentially commands. */
         if (!strcasecmp(event,"command")) {
             advise_large_objects = 1;
@@ -293,11 +271,7 @@ sds createLatencyReport(void) {
     } else {
         /* Add all the suggestions accumulated so far. */
 
-        /* Better VM. */
         report = sdscat(report,"\nI have a few advices for you:\n\n");
-        if (advise_better_vm) {
-            report = sdscat(report,"- If you are using a virtual machine, consider upgrading it with a faster one using an hypervisior that provides less latency during fork() calls. Xen is known to have poor fork() performance. Even in the context of the same VM provider, certain kinds of instances can execute fork faster than others.\n");
-        }
 
         /* Intrinsic latency. */
         if (advise_scheduler) {

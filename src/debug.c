@@ -85,22 +85,68 @@ void debugCommand(client *c) {
         sizes = sdscatprintf(sizes,"counter:%d ", (int)sizeof(counter));
         sizes = sdscatprintf(sizes,"sdshdr:%d", (int)sizeof(struct sdshdr));
         addReplyBulkSds(c,sizes);
-    } else if (!strcasecmp(c->argv[1]->ptr,"hits") && c->argc == 3) {
+    } else if (!strcasecmp(c->argv[1]->ptr,"counter") && c->argc == 3) {
+        int i;
+        char buf[5+40+2];
+        listNode *ln;
+        listIter li;
         counter *cntr = counterLookup(c->argv[2]->ptr);
 
         if (cntr == NULL) {
-            addReplyLongLong(c, 0);
-        } else {
-            addReplyLongLong(c, cntr->hits);
+            addReplyError(c,"Unknown counter");
+            return;
         }
-    } else if (!strcasecmp(c->argv[1]->ptr,"misses") && c->argc == 3) {
+
+        addReplyMultiBulkLen(c,5);
+
+        addReplyMultiBulkLen(c,listLength(cntr->shards));
+
+        memcpy(buf, "$40\r\n", 5);
+        buf[5+40+0] = '\r';
+        buf[5+40+1] = '\n';
+
+        listRewind(cntr->shards,&li);
+        while ((ln = listNext(&li)) != NULL) {
+            shard *shrd = listNodeValue(ln);
+
+            memcpy(&buf[5], shrd->node_name, DISCNT_CLUSTER_NAMELEN);
+
+            addReplyMultiBulkLen(c,5);
+            addReplyString(c, buf, 5+40+2);
+            addReplyLongDouble(c, shrd->value);
+            addReplyLongLong(c, shrd->predict_time);
+            addReplyLongDouble(c, shrd->predict_value);
+            addReplyLongDouble(c, shrd->predict_change);
+        }
+
+        addReplyLongDouble(c, cntr->value);
+
+        addReplyMultiBulkLen(c, server.history_size);
+        for (i = server.history_index; i >= 0; i--) {
+            addReplyLongDouble(c, cntr->history[i]);
+        }
+        for (i = server.history_size - 1; i > server.history_index; i--) {
+            addReplyLongDouble(c, cntr->history[i]);
+        }
+
+        addReplyLongLong(c, cntr->hits);
+        addReplyLongLong(c, cntr->misses);
+    } else if (!strcasecmp(c->argv[1]->ptr,"prediction") && c->argc == 3) {
+        listNode *ln;
+        listIter li;
+        long double prediction = 0;
         counter *cntr = counterLookup(c->argv[2]->ptr);
 
-        if (cntr == NULL) {
-            addReplyLongLong(c, 0);
-        } else {
-            addReplyLongLong(c, cntr->misses);
+        if (cntr != NULL) {
+            listRewind(cntr->shards,&li);
+            while ((ln = listNext(&li)) != NULL) {
+                shard *shrd = listNodeValue(ln);
+
+                prediction += shrd->predict_change;
+            }
         }
+
+        addReplyLongDouble(c, prediction);
     } else {
         addReplyErrorFormat(c, "Unknown DEBUG subcommand or wrong number of arguments for '%s'",
             (char*)c->argv[1]->ptr);

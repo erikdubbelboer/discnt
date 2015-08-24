@@ -35,13 +35,25 @@
 
 
 void counterUpdateHistory(counter *cntr) {
-    cntr->history[server.history_index] = cntr->myrepl->value;
+    cntr->history[server.history_index] = cntr->myshard->value;
 }
 
-void counterPredict(counter *cntr, mstime_t now) {
-    cntr->myrepl->predict_time   = now;
-    cntr->myrepl->predict_value  = cntr->myrepl->value;
-    cntr->myrepl->predict_change = (cntr->myrepl->value - cntr->history[server.history_index]) / ((long double)server.history_size * 1000.0);
+void counterPredict(counter *cntr, mstime_t now, int history_last_index) {
+    long double change = 0, last = cntr->myshard->value;
+    int i;
+
+    for (i = history_last_index; i >= 0; i--) {
+        change += (last - cntr->history[i]);
+        last    = cntr->history[i];
+    }
+    for (i = server.history_size - 1; i > history_last_index; i--) {
+        change += (last - cntr->history[i]);
+        last    = cntr->history[i];
+    }
+
+    cntr->myshard->predict_time   = now;
+    cntr->myshard->predict_value  = cntr->myshard->value;
+    cntr->myshard->predict_change = change / ((long double)(server.history_size) * 1000.0);
 }
 
 void dictCounterDestructor(void *privdata, void *val) {
@@ -52,14 +64,14 @@ void dictCounterDestructor(void *privdata, void *val) {
 
     if (val == NULL) return; /* Values of swapped out keys as set to NULL */
 
-    listRewind(cntr->replicas,&li);
+    listRewind(cntr->shards,&li);
     while ((ln = listNext(&li)) != NULL) {
-        replica *repl = listNodeValue(ln);
+        shard *shrd = listNodeValue(ln);
 
-        zfree(repl);
+        zfree(shrd);
     }
 
-    listRelease(cntr->replicas);
+    listRelease(cntr->shards);
 
     if (cntr->acks) dictEmpty(cntr->acks,NULL);
 
@@ -82,9 +94,8 @@ counter *counterCreate(sds name) {
 
     memset(cntr, 0, sizeof(counter) + (sizeof(long double) * server.history_size));
 
-    cntr->name     = sdsdup(name);
-    cntr->replicas = listCreate();
-
+    cntr->name    = sdsdup(name);
+    cntr->shards  = listCreate();
     cntr->history = (long double*)(cntr + 1);
 
     retval = dictAdd(server.counters, cntr->name, cntr);
@@ -96,7 +107,6 @@ counter *counterCreate(sds name) {
 void incrCommand(client *c) {
     long double increment;
     counter *cntr;
-    robj *new;
 
     if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != DISCNT_OK)
         return;
@@ -106,26 +116,24 @@ void incrCommand(client *c) {
         cntr = counterCreate(c->argv[1]->ptr);
     }
 
-    if (cntr->myrepl == NULL) {
-        cntr->myrepl = zmalloc(sizeof(replica));
-        cntr->myrepl->node = myself;
-        cntr->myrepl->value = increment;
-        cntr->myrepl->predict_time   = 0;
-        cntr->myrepl->predict_value  = 0;
-        cntr->myrepl->predict_change = 0;
+    if (cntr->myshard == NULL) {
+        cntr->myshard = zmalloc(sizeof(shard));
+        cntr->myshard->node = myself;
+        cntr->myshard->value = increment;
+        cntr->myshard->predict_time   = 0;
+        cntr->myshard->predict_value  = 0;
+        cntr->myshard->predict_change = 0;
 
-        memcpy(cntr->myrepl->node_name,myself->name,DISCNT_CLUSTER_NAMELEN);
+        memcpy(cntr->myshard->node_name,myself->name,DISCNT_CLUSTER_NAMELEN);
 
-        listAddNodeTail(cntr->replicas, cntr->myrepl);
+        listAddNodeTail(cntr->shards, cntr->myshard);
     } else {
-        cntr->myrepl->value += increment;
+        cntr->myshard->value += increment;
     }
 
     cntr->value += increment;
 
-    new = createStringObjectFromLongDouble(cntr->value);
-
-    addReplyBulk(c, new);
+    addReplyLongDouble(c, cntr->value);
 }
 
 void getCommand(client *c) {
@@ -137,9 +145,32 @@ void getCommand(client *c) {
         value = cntr->value;
     }
 
-    robj *new = createStringObjectFromLongDouble(value);
+    addReplyLongDouble(c, value);
+}
 
-    addReplyBulk(c, new);
+void countersCommand(client *c) {
+    dictIterator *di;
+    dictEntry *de;
+    sds pattern = c->argv[1]->ptr;
+    int plen = sdslen(pattern), allkeys;
+    unsigned long numkeys = 0;
+    void *replylen = addDeferredMultiBulkLength(c);
+
+    di = dictGetSafeIterator(server.counters);
+    allkeys = (pattern[0] == '*' && pattern[1] == '\0');
+    while((de = dictNext(di)) != NULL) {
+        sds key = dictGetKey(de);
+        robj *keyobj;
+
+        if (allkeys || stringmatchlen(pattern,plen,key,sdslen(key),0)) {
+            keyobj = createStringObject(key,sdslen(key));
+            addReplyBulk(c,keyobj);
+            numkeys++;
+            decrRefCount(keyobj);
+        }
+    }
+    dictReleaseIterator(di);
+    setDeferredMultiBulkLength(c,replylen,numkeys);
 }
 
 void countersAddNode(clusterNode *node) {
@@ -151,16 +182,16 @@ void countersAddNode(clusterNode *node) {
         counter *cntr;
         listNode *ln;
         listIter li;
-        replica *repl;
+        shard *shrd;
 
         cntr = dictGetVal(de);
 
-        listRewind(cntr->replicas,&li);
+        listRewind(cntr->shards,&li);
         while ((ln = listNext(&li)) != NULL) {
-            repl = listNodeValue(ln);
+            shrd = listNodeValue(ln);
 
-            if (memcmp(repl->node_name, node->name, DISCNT_CLUSTER_NAMELEN) == 0) {
-                repl->node = node;
+            if (memcmp(shrd->node_name, node->name, DISCNT_CLUSTER_NAMELEN) == 0) {
+                shrd->node = node;
             }
         }
     }
@@ -176,18 +207,18 @@ void countersNodeFail(clusterNode *node) {
         counter *cntr;
         listNode *ln;
         listIter li;
-        replica *repl;
+        shard *shrd;
 
         cntr = dictGetVal(de);
 
-        listRewind(cntr->replicas,&li);
+        listRewind(cntr->shards,&li);
         while ((ln = listNext(&li)) != NULL) {
-            repl = listNodeValue(ln);
+            shrd = listNodeValue(ln);
 
-            if (repl->node == node) {
+            if (shrd->node == node) {
                 /* Remove prediction, don't update our prediction
-                   for this replica anymore. */
-                repl->predict_time = 0;
+                   for this shard anymore. */
+                shrd->predict_time = 0;
             }
         }
     }
@@ -197,6 +228,10 @@ void countersNodeFail(clusterNode *node) {
 void counterMaybeResend(counter *cntr) {
     int i;
     clusterNode *node;
+
+    if (cntr->updated > mstime()-5000) {
+        return;
+    }
 
     if (dictSize(cntr->acks) == 0) {
         return;
@@ -208,7 +243,7 @@ void counterMaybeResend(counter *cntr) {
         if (node->link == NULL) continue;
 
         if (dictFind(cntr->acks, node->name) != NULL) {
-            clusterSendReplicaToNode(cntr, node);
+            clusterSendShardToNode(cntr, node);
         }
     }
 }
@@ -219,10 +254,12 @@ void counterMaybeResend(counter *cntr) {
 
 /* This is executed every second */
 void countersHistoryCron(void) {
+    int history_last_index;
     dictIterator *it;
     dictEntry *de;
     mstime_t now = mstime();
 
+    history_last_index = server.history_index;
     server.history_index = (server.history_index + 1) % server.history_size;
     
     it = dictGetIterator(server.counters);
@@ -232,32 +269,41 @@ void countersHistoryCron(void) {
 
         cntr = dictGetVal(de);
 
-        if (cntr->myrepl == NULL) {
+        if (cntr->myshard == NULL) {
             continue;
         }
 
-        counterUpdateHistory(cntr);
+        if (cntr->myshard->predict_time > 0) {
+            elapsed = (now - cntr->myshard->predict_time);
+            rvalue = cntr->myshard->predict_value + (elapsed * cntr->myshard->predict_change);
 
-        if (cntr->myrepl->predict_time > 0) {
-            elapsed = (now - cntr->myrepl->predict_time);
-            rvalue = cntr->myrepl->predict_value + (elapsed * cntr->myrepl->predict_change);
-
-            if (fabs((double)(rvalue - cntr->myrepl->value)) <= server.precision) {
+            if (fabs((double)(rvalue - cntr->myshard->value)) <= server.precision) {
                 /* It's still up to date, check if we need to resend our last prediction. */
                 counterMaybeResend(cntr);
 
-                cntr->hits++;
+                /* Only count hits for when something actually changed but
+                 * is still within prediction. */
+                if (cntr->history[history_last_index] != cntr->myshard->value) {
+                    server.stat_hits++;
+                    cntr->hits++;
+                }
+
+                counterUpdateHistory(cntr);
+
+                continue;
             }
         }
 
         /* New prediction. */
         cntr->revision++;
 
+        server.stat_misses++;
         cntr->misses++;
 
-        counterPredict(cntr, now);
-
-        clusterSendReplica(cntr);
+        counterPredict(cntr, now, history_last_index);
+        clusterSendShard(cntr);
+        counterUpdateHistory(cntr);
+        cntr->updated = mstime();
     }
     dictReleaseIterator(it);
 }
@@ -274,25 +320,25 @@ void countersValueCron(void) {
         counter *cntr;
         listNode *ln;
         listIter li;
-        replica *repl;
+        shard *shrd;
 
         cntr = dictGetVal(de);
 
-        listRewind(cntr->replicas,&li);
+        listRewind(cntr->shards,&li);
         while ((ln = listNext(&li)) != NULL) {
-            repl = listNodeValue(ln);
+            shrd = listNodeValue(ln);
 
-            if (repl == cntr->myrepl) {
-                value += repl->value;
+            if (shrd == cntr->myshard) {
+                value += shrd->value;
                 continue;
             }
 
-            if (repl->predict_time > 0 && repl->predict_value > 0) {
-                elapsed = (now - repl->predict_time);
-                repl->value = repl->predict_value + (elapsed * repl->predict_change);
+            if (shrd->predict_time > 0 && shrd->predict_value > 0) {
+                elapsed = (now - shrd->predict_time);
+                shrd->value = shrd->predict_value + (elapsed * shrd->predict_change);
             }
 
-            value += repl->value;
+            value += shrd->value;
         }
     
         cntr->value = value;

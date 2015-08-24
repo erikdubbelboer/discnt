@@ -34,25 +34,25 @@
 #include "cluster.h"
 
 
-typedef struct replica {
+typedef struct shard {
     clusterNode *node;
     char         node_name[DISCNT_CLUSTER_NAMELEN];
 
-    /* For our replica (node == myself) this is the actual value.
-     * For other replicas this is our last prediction of the value.
+    /* For our shard (node == myself) this is the actual value.
+     * For other shards this is our last prediction of the value.
      */
     long double value;
 
     mstime_t    predict_time;   /* Time we made the last prediction. */
     long double predict_value;  /* Value at the last prediction. */
     long double predict_change; /* Change per micro second. */
-} replica;
+} shard;
 
 /* Counter representation in memory. */
 typedef struct counter {
-    sds      name;
-    list     *replicas;
-    replica  *myrepl;
+    sds   name;
+    list  *shards;
+    shard *myshard;
 
     long double value;    /* Cached value. */
     long double *history; /* History of this counter per second for server.history_size seconds. */

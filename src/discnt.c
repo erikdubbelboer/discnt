@@ -124,6 +124,7 @@ struct serverCommand serverCommandTable[] = {
     /* Counter commands. */
     {"incr",incrCommand,3,"wmF",0,NULL,0,0,0,0,0},
     {"get",getCommand,2,"rF",0,NULL,0,0,0,0,0},
+    {"counters",countersCommand,2,"r",0,NULL,0,0,0,0,0},
 };
 
 /*============================ Utility functions ============================ */
@@ -1038,8 +1039,6 @@ void resetServerStats(void) {
 
     server.stat_numcommands = 0;
     server.stat_numconnections = 0;
-    server.stat_fork_time = 0;
-    server.stat_fork_rate = 0;
     server.stat_rejected_conn = 0;
     for (j = 0; j < DISCNT_METRIC_COUNT; j++) {
         server.inst_metric[j].idx = 0;
@@ -1050,6 +1049,8 @@ void resetServerStats(void) {
     }
     server.stat_net_input_bytes = 0;
     server.stat_net_output_bytes = 0;
+    server.stat_hits = 0;
+    server.stat_misses = 0;
 }
 
 void initServer(void) {
@@ -1692,8 +1693,12 @@ sds genDiscntInfoString(char *section) {
         if (sections++) info = sdscat(info,"\r\n");
         info = sdscatprintf(info,
             "# Counters\r\n"
-            "counters:%llu\r\n",
-            (unsigned long long) dictSize(server.counters));
+            "counters:%lu\r\n"
+            "hits:%lld\r\n"
+            "misses:%lld\r\n",
+            dictSize(server.counters),
+            server.stat_hits,
+            server.stat_misses);
     }
 
     /* Persistence */
@@ -1748,8 +1753,7 @@ sds genDiscntInfoString(char *section) {
             "total_net_output_bytes:%lld\r\n"
             "instantaneous_input_kbps:%.2f\r\n"
             "instantaneous_output_kbps:%.2f\r\n"
-            "rejected_connections:%lld\r\n"
-            "latest_fork_usec:%lld\r\n",
+            "rejected_connections:%lld\r\n",
             server.stat_numconnections,
             server.stat_numcommands,
             getInstantaneousMetric(DISCNT_METRIC_COMMAND),
@@ -1757,8 +1761,7 @@ sds genDiscntInfoString(char *section) {
             server.stat_net_output_bytes,
             (float)getInstantaneousMetric(DISCNT_METRIC_NET_INPUT)/1024,
             (float)getInstantaneousMetric(DISCNT_METRIC_NET_OUTPUT)/1024,
-            server.stat_rejected_conn,
-            server.stat_fork_time);
+            server.stat_rejected_conn);
     }
 
     /* CPU */

@@ -25,9 +25,11 @@ test "Prediction should be resend" {
         fail "Restarted nodes FAIL flag not cleared after some time"
     }
 
-    after 1100
+    # If we don't receive an ack for a prediction we wait
+    # 5 seconds before we send it again. So wait at last this time.
+    after 6100
 
     set v [D 2 get test]
-    assert {$v <= 1.25}
-    assert {$v >= 1.0 }
+    assert {$v <= 4.0}
+    assert {$v >= 1.0}
 }
