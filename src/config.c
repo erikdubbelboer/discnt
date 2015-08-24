@@ -202,6 +202,11 @@ void loadServerConfigFromString(char *config) {
             if (server.precision < 0) {
                 err = "Invalid precision"; goto loaderr;
             }
+        } else if (!strcasecmp(argv[0],"history") && argc == 2) {
+            server.history_size = atoi(argv[1]);
+            if (server.history_size < 1) {
+                err = "Invalid history"; goto loaderr;
+            }
         } else if (!strcasecmp(argv[0],"maxmemory") && argc == 2) {
             server.maxmemory = memtoll(argv[1],NULL);
             if (server.maxmemory <= 0) {
@@ -567,6 +572,7 @@ void configGetCommand(client *c) {
     config_get_numerical_field("databases",server.dbnum);
     config_get_numerical_field("maxclients",server.maxclients);
     config_get_double_field("precision",server.precision);
+    config_get_numerical_field("history",server.history_size);
     config_get_numerical_field("watchdog-period",server.watchdog_period);
     config_get_numerical_field("hz",server.hz);
     config_get_numerical_field("cluster-node-timeout",server.cluster_node_timeout);
@@ -1167,7 +1173,8 @@ int rewriteConfig(char *path) {
     rewriteConfigDirOption(state);
     rewriteConfigStringOption(state,"requirepass",server.requirepass,NULL);
     rewriteConfigNumericalOption(state,"maxclients",server.maxclients,DISCNT_MAX_CLIENTS);
-    rewriteConfigDoubleOption(state,"precision",server.precision,1);
+    rewriteConfigDoubleOption(state,"precision",server.precision,DISCNT_PRECISION);
+    rewriteConfigNumericalOption(state,"history",server.history_size,DISCNT_HISTORY);
     rewriteConfigBytesOption(state,"maxmemory",server.maxmemory,DISCNT_DEFAULT_MAXMEMORY);
     rewriteConfigStringOption(state,"cluster-config-file",server.cluster_configfile,DISCNT_DEFAULT_CLUSTER_CONFIG_FILE);
     rewriteConfigNumericalOption(state,"cluster-node-timeout",server.cluster_node_timeout,DISCNT_CLUSTER_DEFAULT_NODE_TIMEOUT);

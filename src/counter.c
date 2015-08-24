@@ -57,10 +57,6 @@ void dictCounterDestructor(void *privdata, void *val) {
     while ((ln = listNext(&li)) != NULL) {
         repl = listNodeValue(ln);
 
-        if (repl->history != NULL) {
-            zfree(repl->history);
-        }
-
         zfree(repl);
     }
 
@@ -104,7 +100,6 @@ void incrCommand(client *c) {
         cntr = counterCreate(c->argv[1]->ptr);
     } else if (listLength(cntr->replicas) > 0) {
         ln = listFirst(cntr->replicas);
-        serverAssert(ln != NULL);
         repl = listNodeValue(ln);
 
         if (repl->node != myself) {
@@ -209,8 +204,7 @@ void countersNodeFail(clusterNode *node) {
  * -------------------------------------------------------------------------- */
 
 /* This is executed every second */
-void countersCron(void) {
-    int predict;
+void countersHistoryCron(void) {
     dictIterator *it;
     dictEntry *de;
     mstime_t now = mstime();
@@ -219,7 +213,47 @@ void countersCron(void) {
     
     it = dictGetIterator(server.counters);
     while ((de = dictNext(it)) != NULL) {
-        long double rvalue, elapsed, value = 0;
+        long double rvalue, elapsed;
+        counter *cntr;
+        listNode *ln;
+        replica *repl;
+
+        cntr = dictGetVal(de);
+
+        ln   = listFirst(cntr->replicas);
+        repl = listNodeValue(ln);
+
+        if (repl->node != myself) {
+            continue;
+        }
+
+        replicaUpdateHistory(repl);
+
+        if (repl->predict_time > 0) {
+            elapsed = (now - repl->predict_time);
+            rvalue = repl->predict_value + (elapsed * repl->predict_change);
+
+            if (fabs((double)(rvalue - repl->value)) <= server.precision) {
+                continue;
+            }
+        }
+
+        replicaPredict(repl, now);
+
+        clusterSendReplica(cntr->name, repl);
+    }
+    dictReleaseIterator(it);
+}
+
+
+void countersValueCron(void) {
+    dictIterator *it;
+    dictEntry *de;
+    mstime_t now = mstime();
+
+    it = dictGetIterator(server.counters);
+    while ((de = dictNext(it)) != NULL) {
+        long double elapsed, value = 0;
         counter *cntr;
         listNode *ln;
         listIter li;
@@ -232,31 +266,13 @@ void countersCron(void) {
             repl = listNodeValue(ln);
 
             if (repl->node == myself) {
-                predict = 0;
+                value += repl->value;
+                continue;
+            }
 
-                if (repl->predict_time == 0) {
-                    predict = 1;
-                } else {
-                    elapsed = (now - repl->predict_time);
-                    rvalue = repl->predict_value + (elapsed * repl->predict_change);
-
-                    if (fabs((double)(rvalue - repl->value)) > server.precision) {
-                        predict = 1;
-                    }
-                }
-
-                if (predict) {
-                    replicaPredict(repl, now);
-
-                    clusterSendReplica(cntr->name, repl);
-                }
-
-                replicaUpdateHistory(repl);
-            } else {
-                if (repl->predict_time > 0 && repl->predict_value > 0) {
-                    elapsed = (now - repl->predict_time);
-                    repl->value = repl->predict_value + (elapsed * repl->predict_change);
-                }
+            if (repl->predict_time > 0 && repl->predict_value > 0) {
+                elapsed = (now - repl->predict_time);
+                repl->value = repl->predict_value + (elapsed * repl->predict_change);
             }
 
             value += repl->value;

@@ -2131,7 +2131,7 @@ void clusterSendReplica(sds name, replica* repl) {
         clusterSendMessage(node->link,payload,totlen);
     }
 
-    if (payload != buf) {
+    if (totlen >= sizeof(buf)) {
         zfree(payload);
     }
 }
@@ -2172,6 +2172,7 @@ void cluserReadReplica(clusterMsgDataCounter *msg, clusterNode *node) {
     if ((repl == NULL) || (repl->node != node)) {
         repl = zmalloc(sizeof(replica));
         repl->node = node;
+        repl->history = NULL;
 
         memcpy(repl->node_name,node->name,DISCNT_CLUSTER_NAMELEN);
 

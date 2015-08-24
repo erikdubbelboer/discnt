@@ -472,9 +472,7 @@ void updateDictResizePolicy(void) {
 /* Remove all the server state and everything else to start
  * like a fresh instance just rebooted. */
 void flushServerData(void) {
-    dictSafeForeach(server.counters,de)
-        dictCounterDestructor(NULL, dictGetVal(de));
-    dictEndForeach
+    dictEmpty(server.counters, NULL);
 }
 
 /* ======================= Cron: called every 100 ms ======================== */
@@ -681,9 +679,12 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     /* Handle background operations on Discnt. */
     databasesCron();
 
-    /* Check counters once per second. */
     run_with_period(1000) {
-        countersCron();
+        countersHistoryCron();
+    }
+
+    run_with_period(100) {
+        countersValueCron();
     }
 
     /* Close clients that need to be closed asynchronous */

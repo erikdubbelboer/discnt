@@ -84,8 +84,8 @@ typedef long long mstime_t; /* millisecond time type. */
 #define DISCNT_SHARED_BULKHDR_LEN 32
 #define DISCNT_MAX_LOGMSG_LEN    1024 /* Default maximum length of syslog messages */
 #define DISCNT_MAX_CLIENTS 10000
-#define DISCNT_HISTORY 10
 #define DISCNT_PRECISION 0.1
+#define DISCNT_HISTORY 10
 #define DISCNT_AUTHPASS_MAX_LEN 512
 #define DISCNT_DEFAULT_SLAVE_PRIORITY 100
 #define DISCNT_REPL_TIMEOUT 60
