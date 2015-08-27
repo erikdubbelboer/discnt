@@ -370,7 +370,6 @@ void configSetCommand(client *c) {
         if (server.maxmemory < zmalloc_used_memory()) {
             serverLog(DISCNT_WARNING,"WARNING: the new maxmemory value set via CONFIG SET is smaller than the current memory usage. The new limit may not be enforced, or the Resident Set Size of the process may not be reduced anyway. Moreover this may result in the inability to accept new jobs and jobs ACKs evictions.");
         }
-        freeMemoryIfNeeded();
     } else if (!strcasecmp(c->argv[2]->ptr,"maxclients")) {
         int orig_value = server.maxclients;
 

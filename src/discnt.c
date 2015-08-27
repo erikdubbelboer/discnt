@@ -1323,14 +1323,9 @@ int processCommand(client *c) {
         return DISCNT_OK;
     }
 
-    /* Handle the maxmemory directive.
-     *
-     * First we try to free some memory if possible (if there are volatile
-     * keys in the dataset). If there are not the only thing we can do
-     * is returning an error. */
+    /* Handle the maxmemory directive. */
     if (server.maxmemory) {
-        int retval = freeMemoryIfNeeded();
-        if ((c->cmd->flags & DISCNT_CMD_DENYOOM) && retval == DISCNT_ERR) {
+        if (getMemoryWarningLevel() && c->cmd->flags & DISCNT_CMD_DENYOOM) {
             addReply(c, shared.oomerr);
             return DISCNT_OK;
         }
@@ -1818,83 +1813,6 @@ void monitorCommand(client *c) {
 }
 
 /* ============================ Maxmemory directive  ======================== */
-
-/* freeMemoryIfNeeded() gets called when 'maxmemory' is set on the config
- * file to limit the max memory used by the server, before processing a
- * command.
- *
- * The goal of the function is to free enough memory to keep Discnt under the
- * configured memory limit.
- *
- * The function starts calculating how many bytes should be freed to keep
- * Discnt under the limit, and enters a loop selecting the best keys to
- * evict accordingly to the configured policy.
- *
- * If all the bytes needed to return back under the limit were freed the
- * function returns DISCNT_OK, otherwise DISCNT_ERR is returned, and the caller
- * should block the execution of commands that will result in more memory
- * used by the server. */
-
-#define DISCNT_NOT_FREED_MAX_LEN 10 /* Return after that count. */
-int freeMemoryIfNeeded(void) {
-    size_t mem_used, mem_tofree, mem_freed, mem_target;
-    mstime_t latency;
-
-    /* We start to reclaim memory only at memory warning 2 or greater, that is
-     * when 95% of maxmemory is reached. */
-    if (getMemoryWarningLevel() < 2) return DISCNT_OK;
-
-    /* Compute how much memory we need to free. */
-    mem_used = zmalloc_used_memory();
-    mem_target = server.maxmemory / 100 * 95;
-
-    /* The following check is not actaully needed since we already checked
-     * that getMemoryWarningLevel() returned 2 or greater, but it is safer
-     * to have given that we are workign with unsigned integers to compute
-     * mem_tofree. */
-    if (mem_used <= mem_target) return DISCNT_OK;
-
-    /* The eviction loop: for up to 2 milliseconds we try to reclaim memory
-     * as long we are able to make progresses, otherwise we just stop ASAP. */
-    mem_tofree = mem_used - mem_target;
-    mem_freed = 0;
-    latencyStartMonitor(latency);
-
-    int not_freed = 0; /* Num of continuous iterations with no job freed. */
-    while (mem_freed < mem_tofree) {
-        long long delta;
-        /*dictEntry *de;*/
-
-        /* Get a random job, check if it is an ACK, release it in that
-         * case, otherwise keep counting the number of iterations we failed
-         * to free jobs. */
-        /* TODO: Discnt Get a random counter and see if we can free a replica with 0
-        de = dictGetRandomKey(server.jobs);*/
-        delta = (long long) zmalloc_used_memory();
-        /*job *job = dictGetKey(de);
-        if (job->state == JOB_STATE_ACKED) {
-            unregisterJob(job);
-            freeJob(job);
-            not_freed = 0;
-        } else {
-            not_freed++;
-        }*/
-        delta -= (long long) zmalloc_used_memory();
-        mem_freed += delta;
-
-        /* If no object was freed in the latest N iterations or we are here
-         * for more than 1 or 2 milliseconds, return to the caller with a
-         * failure return value. */
-        if (not_freed > DISCNT_NOT_FREED_MAX_LEN || (mstime() - latency) > 1) {
-            latencyEndMonitor(latency);
-            latencyAddSampleIfNeeded("eviction-cycle",latency);
-            return DISCNT_ERR; /* nothing to free... */
-        }
-    }
-    latencyEndMonitor(latency);
-    latencyAddSampleIfNeeded("eviction-cycle",latency);
-    return DISCNT_OK;
-}
 
 /* Get the memory warning level:
  *

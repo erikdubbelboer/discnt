@@ -56,6 +56,19 @@ void counterPredict(counter *cntr, mstime_t now, int history_last_index) {
     cntr->myshard->predict_change = change / ((long double)(server.history_size) * 1000.0);
 }
 
+void counterClearAcks(counter *cntr) {
+    if (cntr->acks == NULL) {
+        cntr->acks = dictCreate(&clusterNodesDictType, NULL);
+    } else {
+        dictEmpty(cntr->acks, NULL);
+    }
+}
+
+void counterAddAck(counter *cntr, clusterNode *node) {
+    int retval = dictAdd(cntr->acks, node->name, NULL);
+    serverAssert(retval == 0);
+}
+
 void dictCounterDestructor(void *privdata, void *val) {
     DICT_NOTUSED(privdata);
     counter* cntr = val;
@@ -139,7 +152,7 @@ void incrCommand(client *c) {
 void getCommand(client *c) {
     long double value = 0;
     counter *cntr;
-   
+
     cntr = counterLookup(c->argv[1]->ptr);
     if (cntr) {
         value = cntr->value;
@@ -177,6 +190,8 @@ void countersAddNode(clusterNode *node) {
     dictIterator *it;
     dictEntry *de;
     
+    if (nodeInHandshake(node)) return;
+
     it = dictGetIterator(server.counters);
     while ((de = dictNext(it)) != NULL) {
         counter *cntr;
@@ -185,6 +200,10 @@ void countersAddNode(clusterNode *node) {
         shard *shrd;
 
         cntr = dictGetVal(de);
+
+        if (cntr->myshard) {
+            clusterSendShardToNode(cntr, node);
+        }
 
         listRewind(cntr->shards,&li);
         while ((ln = listNext(&li)) != NULL) {
@@ -201,7 +220,7 @@ void countersAddNode(clusterNode *node) {
 void countersNodeFail(clusterNode *node) {
     dictIterator *it;
     dictEntry *de;
-    
+
     it = dictGetIterator(server.counters);
     while ((de = dictNext(it)) != NULL) {
         counter *cntr;
@@ -261,7 +280,7 @@ void countersHistoryCron(void) {
 
     history_last_index = server.history_index;
     server.history_index = (server.history_index + 1) % server.history_size;
-    
+
     it = dictGetIterator(server.counters);
     while ((de = dictNext(it)) != NULL) {
         long double rvalue, elapsed;
@@ -340,7 +359,7 @@ void countersValueCron(void) {
 
             value += shrd->value;
         }
-    
+
         cntr->value = value;
     }
     dictReleaseIterator(it);

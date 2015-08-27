@@ -70,6 +70,8 @@ typedef struct counter {
  * Exported API.
  *----------------------------------------------------------------------------*/
 
+void counterClearAcks(counter *cntr);
+void counterAddAck(counter *cntr, clusterNode *node);
 counter *counterLookup(sds name);
 counter *counterCreate(sds name);
 void countersAddNode(clusterNode *node);

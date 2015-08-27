@@ -2108,6 +2108,8 @@ void clusterSendShardToNode(counter *cntr, clusterNode *node) {
     clusterMsg *hdr = (clusterMsg*) buf;
     uint32_t totlen;
 
+    if (node->link == NULL) return;
+
     totlen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
     totlen += sizeof(clusterMsgDataCounter) - sizeof(hdr->data.counter.shard.name);
     totlen += sdslen(cntr->name);
@@ -2142,16 +2144,11 @@ void clusterSendShardToNode(counter *cntr, clusterNode *node) {
 }
 
 void clusterSendShard(counter *cntr) {
-    int retval;
     dictIterator *di;
     dictEntry *de;
     clusterNode *node;
 
-    if (cntr->acks == NULL) {
-        cntr->acks = dictCreate(&clusterNodesDictType, NULL);
-    } else {
-        dictEmpty(cntr->acks, NULL);
-    }
+    counterClearAcks(cntr);
 
     di = dictGetIterator(server.cluster->nodes);
     while((de = dictNext(di)) != NULL) {
@@ -2160,10 +2157,7 @@ void clusterSendShard(counter *cntr) {
         if (node == myself) continue;
         if (nodeInHandshake(node)) return;
 
-        retval = dictAdd(cntr->acks, node->name, NULL);
-        serverAssert(retval == 0);
-
-        if (node->link == NULL) continue;
+        counterAddAck(cntr, node);
 
         clusterSendShardToNode(cntr, node);
     }

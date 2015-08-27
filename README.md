@@ -60,7 +60,7 @@ Clients should use this as an handshake command when connecting with a
 Discnt node.
 
     COUNTERS patten
-Similar to redis KEYS
+Similar to redis KEYS.
 
 Client libraries
 ===
