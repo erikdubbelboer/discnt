@@ -11,4 +11,7 @@ then
     echo "You need tcl 8.5 or newer in order to run the Discnt test"
     exit 1
 fi
-$TCLSH tests/cluster/run.tcl $*
+$TCLSH tests/test_helper.tcl $*
+if [ $? -eq 0 ]; then
+    $TCLSH tests/cluster/run.tcl $*
+fi

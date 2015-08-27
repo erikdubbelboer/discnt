@@ -69,13 +69,9 @@ void counterAddAck(counter *cntr, clusterNode *node) {
     serverAssert(retval == 0);
 }
 
-void dictCounterDestructor(void *privdata, void *val) {
-    DICT_NOTUSED(privdata);
-    counter* cntr = val;
+void counterFree(counter *cntr) {
     listNode *ln;
     listIter li;
-
-    if (val == NULL) return; /* Values of swapped out keys as set to NULL */
 
     listRewind(cntr->shards,&li);
     while ((ln = listNext(&li)) != NULL) {
@@ -86,9 +82,19 @@ void dictCounterDestructor(void *privdata, void *val) {
 
     listRelease(cntr->shards);
 
-    if (cntr->acks) dictEmpty(cntr->acks,NULL);
+    if (cntr->acks) dictRelease(cntr->acks);
 
     /* cntr->name will be freed by the dict code. */
+
+    zfree(cntr);
+}
+
+void dictCounterDestructor(void *privdata, void *val) {
+    DICT_NOTUSED(privdata);
+
+    if (val == NULL) return; /* Values of swapped out keys as set to NULL */
+
+    counterFree(val);
 }
 
 counter *counterLookup(sds name) {
@@ -101,20 +107,18 @@ counter *counterLookup(sds name) {
 }
 
 counter *counterCreate(sds name) {
-    int retval;
+    counter *cntr = zcalloc(sizeof(counter) + (sizeof(long double) * server.history_size));
 
-    counter *cntr = zmalloc(sizeof(counter) + (sizeof(long double) * server.history_size));
-
-    memset(cntr, 0, sizeof(counter) + (sizeof(long double) * server.history_size));
-
-    cntr->name    = sdsdup(name);
+    cntr->name    = name;
     cntr->shards  = listCreate();
     cntr->history = (long double*)(cntr + 1);
 
-    retval = dictAdd(server.counters, cntr->name, cntr);
-    serverAssert(retval == 0);
-
     return cntr;
+}
+
+void counterAdd(counter *cntr) {
+    int retval = dictAdd(server.counters, cntr->name, cntr);
+    serverAssert(retval == 0);
 }
 
 void incrCommand(client *c) {
@@ -126,16 +130,14 @@ void incrCommand(client *c) {
 
     cntr = counterLookup(c->argv[1]->ptr);
     if (cntr == NULL) {
-        cntr = counterCreate(c->argv[1]->ptr);
+        cntr = counterCreate(sdsdup(c->argv[1]->ptr));
+        counterAdd(cntr);
     }
 
     if (cntr->myshard == NULL) {
-        cntr->myshard = zmalloc(sizeof(shard));
+        cntr->myshard = zcalloc(sizeof(shard));
         cntr->myshard->node = myself;
         cntr->myshard->value = increment;
-        cntr->myshard->predict_time   = 0;
-        cntr->myshard->predict_value  = 0;
-        cntr->myshard->predict_change = 0;
 
         memcpy(cntr->myshard->node_name,myself->name,DISCNT_CLUSTER_NAMELEN);
 
@@ -145,6 +147,8 @@ void incrCommand(client *c) {
     }
 
     cntr->value += increment;
+
+    server.dirty++;
 
     addReplyLongDouble(c, cntr->value);
 }
@@ -248,11 +252,11 @@ void counterMaybeResend(counter *cntr) {
     int i;
     clusterNode *node;
 
-    if (cntr->updated > mstime()-5000) {
+    if (cntr->acks == NULL || dictSize(cntr->acks) == 0) {
         return;
     }
 
-    if (dictSize(cntr->acks) == 0) {
+    if (cntr->updated > mstime()-5000) {
         return;
     }
 
@@ -321,14 +325,21 @@ void countersHistoryCron(void) {
 
         counterPredict(cntr, now, history_last_index);
         clusterSendShard(cntr);
+
         counterUpdateHistory(cntr);
+
         cntr->updated = mstime();
+
+        server.dirty++;
     }
     dictReleaseIterator(it);
 }
 
-
 void countersValueCron(void) {
+    countersUpdateValues();
+}
+
+void countersUpdateValues(void) {
     dictIterator *it;
     dictEntry *de;
     mstime_t now = mstime();
@@ -364,3 +375,4 @@ void countersValueCron(void) {
     }
     dictReleaseIterator(it);
 }
+

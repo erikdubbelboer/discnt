@@ -61,8 +61,8 @@ typedef struct counter {
     dict     *acks;
     mstime_t updated;
 
-    long long hits;
-    long long misses;
+    uint32_t hits;
+    uint32_t misses;
 } counter;
 
 
@@ -73,8 +73,11 @@ typedef struct counter {
 void counterClearAcks(counter *cntr);
 void counterAddAck(counter *cntr, clusterNode *node);
 counter *counterLookup(sds name);
-counter *counterCreate(sds name);
+counter *counterCreate(sds name); /* Create a counter but don't add it to server.counters. */
+void counterAdd(counter *cntr);   /* Add the counter to server.counters. */
+void counterFree(counter *cntr);
 void countersAddNode(clusterNode *node);
 void countersNodeFail(clusterNode *node);
+void countersUpdateValues(void);
 
 #endif

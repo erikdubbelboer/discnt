@@ -91,7 +91,7 @@ int clusterLoadConfig(char *filename) {
         if (errno == ENOENT) {
             return DISCNT_ERR;
         } else {
-            serverLog(DISCNT_WARNING,
+            serverLog(LL_WARNING,
                 "Loading the cluster node config from %s: %s",
                 filename, strerror(errno));
             exit(1);
@@ -130,7 +130,7 @@ int clusterLoadConfig(char *filename) {
                 if (strcasecmp(argv[j],"someVarNameHere") == 0) {
                     /* TODO: currently not used. */
                 } else {
-                    serverLog(DISCNT_WARNING,
+                    serverLog(LL_WARNING,
                         "Skipping unknown cluster config variable '%s'",
                         argv[j]);
                 }
@@ -193,11 +193,11 @@ int clusterLoadConfig(char *filename) {
     zfree(line);
     fclose(fp);
 
-    serverLog(DISCNT_NOTICE,"Node configuration loaded, I'm %.40s", myself->name);
+    serverLog(LL_NOTICE,"Node configuration loaded, I'm %.40s", myself->name);
     return DISCNT_OK;
 
 fmterr:
-    serverLog(DISCNT_WARNING,
+    serverLog(LL_WARNING,
         "Unrecoverable error: corrupted cluster config file.");
     zfree(line);
     if (fp) fclose(fp);
@@ -267,7 +267,7 @@ err:
 
 void clusterSaveConfigOrDie(int do_fsync) {
     if (clusterSaveConfig(do_fsync) == -1) {
-        serverLog(DISCNT_WARNING,"Fatal: can't update cluster config file.");
+        serverLog(LL_WARNING,"Fatal: can't update cluster config file.");
         exit(1);
     }
 }
@@ -287,7 +287,7 @@ int clusterLockConfig(char *filename) {
      * processes. */
     int fd = open(filename,O_WRONLY|O_CREAT,0644);
     if (fd == -1) {
-        serverLog(DISCNT_WARNING,
+        serverLog(LL_WARNING,
             "Can't open %s in order to acquire a lock: %s",
             filename, strerror(errno));
         return DISCNT_ERR;
@@ -295,13 +295,13 @@ int clusterLockConfig(char *filename) {
 
     if (flock(fd,LOCK_EX|LOCK_NB) == -1) {
         if (errno == EWOULDBLOCK) {
-            serverLog(DISCNT_WARNING,
+            serverLog(LL_WARNING,
                  "Sorry, the cluster configuration file %s is already used "
                  "by a different Discnt node. Please make sure that "
                  "different nodes use different cluster configuration "
                  "files.", filename);
         } else {
-            serverLog(DISCNT_WARNING,
+            serverLog(LL_WARNING,
                 "Impossible to lock %s: %s", filename, strerror(errno));
         }
         close(fd);
@@ -340,7 +340,7 @@ void clusterInit(void) {
          * by the createClusterNode() function. */
         myself = server.cluster->myself =
             createClusterNode(NULL,DISCNT_NODE_MYSELF);
-        serverLog(DISCNT_NOTICE,"No cluster configuration found, I'm %.40s",
+        serverLog(LL_NOTICE,"No cluster configuration found, I'm %.40s",
             myself->name);
         clusterAddNode(myself);
         saveconf = 1;
@@ -354,7 +354,7 @@ void clusterInit(void) {
      * The other handshake port check is triggered too late to stop
      * us from trying to use a too-high cluster port number. */
     if (server.port > (65535-DISCNT_CLUSTER_PORT_INCR)) {
-        serverLog(DISCNT_WARNING, "Discnt port number too high. "
+        serverLog(LL_WARNING, "Discnt port number too high. "
                    "Cluster communication port is 10,000 port "
                    "numbers higher than your Discnt node port. "
                    "Your Discnt node port number must be "
@@ -473,7 +473,7 @@ void clusterAcceptHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
         cfd = anetTcpAccept(server.neterr, fd, cip, sizeof(cip), &cport);
         if (cfd == ANET_ERR) {
             if (errno != EWOULDBLOCK)
-                serverLog(DISCNT_VERBOSE,
+                serverLog(LL_VERBOSE,
                     "Accepting cluster node: %s", server.neterr);
             return;
         }
@@ -481,7 +481,7 @@ void clusterAcceptHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
         anetEnableTcpNoDelay(NULL,cfd);
 
         /* Use non-blocking I/O for cluster messages. */
-        serverLog(DISCNT_VERBOSE,"Accepted cluster node %s:%d", cip, cport);
+        serverLog(LL_VERBOSE,"Accepted cluster node %s:%d", cip, cport);
         /* Create a link object we use to handle the connection.
          * It gets passed to the readable handler when data is available.
          * Initiallly the link->node pointer is set to NULL as we don't know
@@ -720,7 +720,7 @@ void clusterRenameNode(clusterNode *node, char *newname) {
     int retval;
     sds s = sdsnewlen(node->name, DISCNT_CLUSTER_NAMELEN);
 
-    serverLog(DISCNT_DEBUG,"Renaming node %.40s into %.40s",
+    serverLog(LL_DEBUG,"Renaming node %.40s into %.40s",
         node->name, newname);
     retval = dictDelete(server.cluster->nodes, s);
     sdsfree(s);
@@ -840,7 +840,7 @@ void markNodeAsFailingIfNeeded(clusterNode *node) {
     failures++;
     if (failures < needed_quorum) return; /* No weak agreement from masters. */
 
-    serverLog(DISCNT_VERBOSE,
+    serverLog(LL_VERBOSE,
         "Marking node %.40s as failing (quorum reached).", node->name);
 
     /* Mark the node as failing. */
@@ -863,7 +863,7 @@ void clearNodeFailureIfNeeded(clusterNode *node) {
     serverAssert(nodeFailed(node));
 
     /* We always clear the FAIL flag if we can contact the node again. */
-    serverLog(DISCNT_VERBOSE,
+    serverLog(LL_VERBOSE,
         "Clear FAIL state for node %.40s: it is reachable again.",
             node->name);
     node->flags &= ~DISCNT_NODE_FAIL;
@@ -962,7 +962,7 @@ void clusterProcessGossipSection(clusterMsg *hdr, clusterLink *link) {
         sds ci;
 
         ci = representDiscntNodeFlags(sdsempty(), flags);
-        serverLog(DISCNT_DEBUG,"GOSSIP %.40s %s:%d %s",
+        serverLog(LL_DEBUG,"GOSSIP %.40s %s:%d %s",
             g->nodename,
             g->ip,
             ntohs(g->port),
@@ -976,14 +976,14 @@ void clusterProcessGossipSection(clusterMsg *hdr, clusterLink *link) {
             if (sender && node != myself) {
                 if (flags & (DISCNT_NODE_FAIL|DISCNT_NODE_PFAIL)) {
                     if (clusterNodeAddFailureReport(node,sender)) {
-                        serverLog(DISCNT_VERBOSE,
+                        serverLog(LL_VERBOSE,
                             "Node %.40s reported node %.40s as not reachable.",
                             sender->name, node->name);
                     }
                     markNodeAsFailingIfNeeded(node);
                 } else {
                     if (clusterNodeDelFailureReport(node,sender)) {
-                        serverLog(DISCNT_VERBOSE,
+                        serverLog(LL_VERBOSE,
                             "Node %.40s reported node %.40s is back online.",
                             sender->name, node->name);
                     }
@@ -1054,7 +1054,7 @@ int nodeUpdateAddressIfNeeded(clusterNode *node, clusterLink *link, int port) {
     node->port = port;
     if (node->link) freeClusterLink(node->link);
     node->flags &= ~DISCNT_NODE_NOADDR;
-    serverLog(DISCNT_WARNING,"Address updated for node %.40s, now %s:%d",
+    serverLog(LL_WARNING,"Address updated for node %.40s, now %s:%d",
         node->name, node->ip, node->port);
 
     return 1;
@@ -1076,7 +1076,7 @@ int clusterProcessPacket(clusterLink *link) {
     clusterNode *sender;
 
     server.cluster->stats_bus_messages_received++;
-    serverLog(DISCNT_DEBUG,"--- Processing packet of type %d, %lu bytes",
+    serverLog(LL_DEBUG,"--- Processing packet of type %d, %lu bytes",
         type, (unsigned long) totlen);
 
     /* Perform sanity checks */
@@ -1119,7 +1119,7 @@ int clusterProcessPacket(clusterLink *link) {
 
     /* Initial processing of PING and MEET requests replying with a PONG. */
     if (type == CLUSTERMSG_TYPE_PING || type == CLUSTERMSG_TYPE_MEET) {
-        serverLog(DISCNT_DEBUG,"Ping packet received: %p", (void*)link->node);
+        serverLog(LL_DEBUG,"Ping packet received: %p", (void*)link->node);
 
         /* We use incoming MEET messages in order to set the address
          * for 'myself', since only other cluster nodes will send us
@@ -1139,7 +1139,7 @@ int clusterProcessPacket(clusterLink *link) {
                 strcmp(ip,myself->ip))
             {
                 memcpy(myself->ip,ip,DISCNT_IP_STR_LEN);
-                serverLog(DISCNT_WARNING,"IP address for this node updated to %s",
+                serverLog(LL_WARNING,"IP address for this node updated to %s",
                     myself->ip);
                 clusterDoBeforeSleep(CLUSTER_TODO_SAVE_CONFIG);
             }
@@ -1173,7 +1173,7 @@ int clusterProcessPacket(clusterLink *link) {
     if (type == CLUSTERMSG_TYPE_PING || type == CLUSTERMSG_TYPE_PONG ||
         type == CLUSTERMSG_TYPE_MEET)
     {
-        serverLog(DISCNT_DEBUG,"%s packet received: %p",
+        serverLog(LL_DEBUG,"%s packet received: %p",
             type == CLUSTERMSG_TYPE_PING ? "ping" : "pong",
             (void*)link->node);
         if (link->node) {
@@ -1181,7 +1181,7 @@ int clusterProcessPacket(clusterLink *link) {
                 /* If we already have this node, try to change the
                  * IP/port of the node with the new one. */
                 if (sender) {
-                    serverLog(DISCNT_VERBOSE,
+                    serverLog(LL_VERBOSE,
                         "Handshake: we already know node %.40s, "
                         "updating the address if needed.", sender->name);
                     if (nodeUpdateAddressIfNeeded(sender,link,ntohs(hdr->port)))
@@ -1198,7 +1198,7 @@ int clusterProcessPacket(clusterLink *link) {
                 /* First thing to do is replacing the random name with the
                  * right node name if this was a handshake stage. */
                 clusterRenameNode(link->node, hdr->sender);
-                serverLog(DISCNT_DEBUG,"Handshake with node %.40s completed.",
+                serverLog(LL_DEBUG,"Handshake with node %.40s completed.",
                     link->node->name);
                 link->node->flags &= ~DISCNT_NODE_HANDSHAKE;
                 clusterDoBeforeSleep(CLUSTER_TODO_UPDATE_STATE|
@@ -1209,7 +1209,7 @@ int clusterProcessPacket(clusterLink *link) {
                 /* If the reply has a non matching node ID we
                  * disconnect this node and set it as not having an associated
                  * address. */
-                serverLog(DISCNT_DEBUG,"PONG contains mismatching sender ID");
+                serverLog(LL_DEBUG,"PONG contains mismatching sender ID");
                 link->node->flags |= DISCNT_NODE_NOADDR;
                 link->node->ip[0] = '\0';
                 link->node->port = 0;
@@ -1258,7 +1258,7 @@ int clusterProcessPacket(clusterLink *link) {
         if (failing &&
             !(failing->flags & (DISCNT_NODE_FAIL|DISCNT_NODE_MYSELF)))
         {
-            serverLog(DISCNT_VERBOSE,
+            serverLog(LL_VERBOSE,
                 "FAIL message received from %.40s about %.40s",
                 hdr->sender, hdr->data.fail.about.nodename);
 
@@ -1280,7 +1280,7 @@ int clusterProcessPacket(clusterLink *link) {
 
         cluserReadAck(&hdr->data.ack.about, sender);
     } else {
-        serverLog(DISCNT_WARNING,"Received unknown packet type: %d", type);
+        serverLog(LL_WARNING,"Received unknown packet type: %d", type);
     }
     return 1;
 }
@@ -1306,7 +1306,7 @@ void clusterWriteHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     nwritten = write(fd, link->sndbuf, sdslen(link->sndbuf));
     if (nwritten <= 0) {
-        serverLog(DISCNT_DEBUG,"I/O error writing to node link: %s",
+        serverLog(LL_DEBUG,"I/O error writing to node link: %s",
             strerror(errno));
         handleLinkIOError(link);
         return;
@@ -1343,7 +1343,7 @@ void clusterReadHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
                 if (memcmp(hdr->sig,"DbuZ",4) != 0 ||
                     ntohl(hdr->totlen) < CLUSTERMSG_MIN_LEN)
                 {
-                    serverLog(DISCNT_WARNING,
+                    serverLog(LL_WARNING,
                         "Bad message length or signature received "
                         "from Cluster bus.");
                     handleLinkIOError(link);
@@ -1359,7 +1359,7 @@ void clusterReadHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
 
         if (nread <= 0) {
             /* I/O error... */
-            serverLog(DISCNT_DEBUG,"I/O error reading from node link: %s",
+            serverLog(LL_DEBUG,"I/O error reading from node link: %s",
                 (nread == 0) ? "connection closed" : strerror(errno));
             handleLinkIOError(link);
             return;
@@ -1633,7 +1633,7 @@ void clusterCron(void) {
                  * so we claim we actually sent a ping now (that will
                  * be really sent as soon as the link is obtained). */
                 if (node->ping_sent == 0) node->ping_sent = mstime();
-                serverLog(DISCNT_DEBUG, "Unable to connect to "
+                serverLog(LL_DEBUG, "Unable to connect to "
                     "Cluster Node [%s]:%d -> %s", node->ip,
                     node->port+DISCNT_CLUSTER_PORT_INCR,
                     server.neterr);
@@ -1667,7 +1667,7 @@ void clusterCron(void) {
              * normal PING packets. */
             node->flags &= ~DISCNT_NODE_MEET;
 
-            serverLog(DISCNT_DEBUG,"Connecting with Node %.40s at %s:%d",
+            serverLog(LL_DEBUG,"Connecting with Node %.40s at %s:%d",
                     node->name, node->ip, node->port+DISCNT_CLUSTER_PORT_INCR);
         }
     }
@@ -1694,7 +1694,7 @@ void clusterCron(void) {
             }
         }
         if (min_pong_node) {
-            serverLog(DISCNT_DEBUG,"Pinging node %.40s", min_pong_node->name);
+            serverLog(LL_DEBUG,"Pinging node %.40s", min_pong_node->name);
             clusterSendPing(min_pong_node->link, CLUSTERMSG_TYPE_PING);
         }
     }
@@ -1754,7 +1754,7 @@ void clusterCron(void) {
             /* Timeout reached. Set the node as possibly failing if it is
              * not already in this state. */
             if (!(node->flags & (DISCNT_NODE_PFAIL|DISCNT_NODE_FAIL))) {
-                serverLog(DISCNT_DEBUG,"*** NODE %.40s possibly failing",
+                serverLog(LL_DEBUG,"*** NODE %.40s possibly failing",
                     node->name);
                 node->flags |= DISCNT_NODE_PFAIL;
                 update_state = 1;
@@ -2130,7 +2130,7 @@ void clusterSendShardToNode(counter *cntr, clusterNode *node) {
         memcpy(payload,buf,sizeof(clusterMsg));
         hdr = (clusterMsg*) payload;
 
-        serverLog(DISCNT_DEBUG,"Need to resize send buffer to %u bytes for counter for %s",
+        serverLog(LL_DEBUG,"Need to resize send buffer to %u bytes for counter for %s",
             totlen, cntr->name);
     }
 
@@ -2155,7 +2155,7 @@ void clusterSendShard(counter *cntr) {
         node = dictGetVal(de);
 
         if (node == myself) continue;
-        if (nodeInHandshake(node)) return;
+        if (nodeInHandshake(node)) continue;
 
         counterAddAck(cntr, node);
 
@@ -2185,6 +2185,7 @@ void cluserReadShard(clusterMsgDataCounter *msg, clusterNode *node) {
     cntr = counterLookup(name);
     if (cntr == NULL) {
         cntr = counterCreate(name);
+        counterAdd(cntr);
     } else {
         listRewind(cntr->shards,&li);
         while ((ln = listNext(&li)) != NULL) {
@@ -2211,8 +2212,8 @@ void cluserReadShard(clusterMsgDataCounter *msg, clusterNode *node) {
     shrd->predict_change = predict_change;
 
     clusterSendAck(node, revision, name);
-
-    sdsfree(name);
+    
+    server.dirty++;
 }
 
 void clusterSendAck(clusterNode *node, uint32_t revision, sds name) {
@@ -2237,7 +2238,7 @@ void clusterSendAck(clusterNode *node, uint32_t revision, sds name) {
         memcpy(payload,buf,sizeof(clusterMsg));
         hdr = (clusterMsg*) payload;
 
-        serverLog(DISCNT_DEBUG,"Need to resize send buffer to %u bytes for ack for %s",
+        serverLog(LL_DEBUG,"Need to resize send buffer to %u bytes for ack for %s",
             totlen, name);
     }
 
@@ -2266,11 +2267,11 @@ void cluserReadAck(clusterMsgDataAck *msg, clusterNode *node) {
             dictDelete(cntr->acks, node->name);
             if (htNeedsResize(cntr->acks)) dictResize(cntr->acks);
         } else {
-            serverLog(DISCNT_VERBOSE,"Ack from %.40s for invalid revision %u of %s at %u",
+            serverLog(LL_VERBOSE,"Ack from %.40s for invalid revision %u of %s at %u",
                 node->name, revision, name, cntr->revision);
         }
     } else {
-        serverLog(DISCNT_VERBOSE,"Ack from %.40s for unknown counter %s",
+        serverLog(LL_VERBOSE,"Ack from %.40s for unknown counter %s",
             node->name, name);
     }
 

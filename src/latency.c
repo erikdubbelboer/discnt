@@ -296,7 +296,7 @@ sds createLatencyReport(void) {
         }
 
         if (advise_no_appendfsync) {
-            report = sdscat(report,"- Assuming from the point of view of data safety this is viable in your environment, you could try to enable the 'no-appendfsync-on-rewrite' option, so that fsync will not be performed while there is a child rewriting the AOF file or producing an RDB file (the moment where there is high disk contention).\n");
+            report = sdscat(report,"- Assuming from the point of view of data safety this is viable in your environment, you could try to enable the 'no-appendfsync-on-rewrite' option, so that fsync will not be performed while there is a child rewriting the AOF file or producing an DDB file (the moment where there is high disk contention).\n");
         }
 
         if (advise_hz && server.hz < 100) {

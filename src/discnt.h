@@ -64,6 +64,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #include "latency.h" /* Latency monitor API */
 #include "sparkline.h" /* ASII graphs API */
 
+
 /* Error codes */
 #define DISCNT_OK                0
 #define DISCNT_ERR               -1
@@ -105,9 +106,9 @@ typedef long long mstime_t; /* millisecond time type. */
 #define DISCNT_DEFAULT_LOGFILE ""
 #define DISCNT_DEFAULT_SYSLOG_ENABLED 0
 #define DISCNT_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR 1
-#define DISCNT_DEFAULT_RDB_COMPRESSION 1
-#define DISCNT_DEFAULT_RDB_CHECKSUM 1
-#define DISCNT_DEFAULT_RDB_FILENAME "dump.rdb"
+#define DISCNT_DEFAULT_DDB_COMPRESSION 1
+#define DISCNT_DEFAULT_DDB_CHECKSUM 1
+#define DISCNT_DEFAULT_DDB_FILENAME "dump.ddb"
 #define DISCNT_DEFAULT_REPL_DISKLESS_SYNC 0
 #define DISCNT_DEFAULT_REPL_DISKLESS_SYNC_DELAY 5
 #define DISCNT_DEFAULT_SLAVE_SERVE_STALE_DATA 1
@@ -207,15 +208,21 @@ typedef long long mstime_t; /* millisecond time type. */
 #define DISCNT_TAIL 1
 
 /* Log levels */
-#define DISCNT_DEBUG 0
-#define DISCNT_VERBOSE 1
-#define DISCNT_NOTICE 2
-#define DISCNT_WARNING 3
+#define LL_DEBUG 0
+#define LL_VERBOSE 1
+#define LL_NOTICE 2
+#define LL_WARNING 3
 #define DISCNT_LOG_RAW (1<<10) /* Modifier to log without timestamp */
-#define DISCNT_DEFAULT_VERBOSITY DISCNT_NOTICE
+#define DISCNT_DEFAULT_VERBOSITY LL_NOTICE
 
 /* Anti-warning macro... */
 #define DISCNT_NOTUSED(V) ((void) V)
+
+/* SHUTDOWN flags */
+#define SHUTDOWN_NOFLAGS 0      /* No flags. */
+#define SHUTDOWN_SAVE 1         /* Force SAVE on SHUTDOWN even if no save
+                                   points are configured. */
+#define SHUTDOWN_NOSAVE 2       /* Don't SAVE on SHUTDOWN. */
 
 /* Units */
 #define UNIT_SECONDS 0
@@ -229,6 +236,10 @@ typedef long long mstime_t; /* millisecond time type. */
 
 /* Command propagation flags, see propagate() function */
 #define DISCNT_PROPAGATE_NONE 0
+
+/* DDB active child save type. */
+#define DDB_CHILD_TYPE_NONE 0
+#define DDB_CHILD_TYPE_DISK 1     /* DDB is written to disk. */
 
 /* Get the first bind addr or NULL */
 #define DISCNT_BIND_ADDR (server.bindaddr_count ? server.bindaddr[0] : NULL)
@@ -313,6 +324,11 @@ typedef struct client {
     int bufpos;
     char buf[DISCNT_REPLY_CHUNK_BYTES];
 } client;
+
+struct saveparam {
+    time_t seconds;
+    int changes;
+};
 
 struct sharedObjectsStruct {
     robj *crlf, *ok, *err, *emptybulk, *czero, *cone, *cnegone, *pong, *space,
@@ -420,6 +436,8 @@ struct discntServer {
     long long stat_numcommands;     /* Number of processed commands */
     long long stat_numconnections;  /* Number of connections received */
     size_t stat_peak_memory;        /* Max used memory record */
+    long long stat_fork_time;       /* Time needed to perform latest fork() */
+    double stat_fork_rate;          /* Fork rate in GB/sec. */
     long long stat_rejected_conn;   /* Clients rejected because of maxclients */
     size_t resident_set_size;       /* RSS sampled in serverCron(). */
     long long stat_net_input_bytes; /* Bytes read from network. */
@@ -476,6 +494,24 @@ struct discntServer {
     int assert_line;
     int bug_report_start; /* True if bug report header was already logged. */
     int watchdog_period;  /* Software watchdog period in ms. 0 = off */
+    /* DDB persistence */
+    long long dirty;                /* Changes to DB from the last save */
+    long long dirty_before_bgsave;  /* Used to restore dirty on failed BGSAVE */
+    pid_t ddb_child_pid;            /* PID of DDB saving child */
+    struct saveparam *saveparams;   /* Save points array for DDB */
+    int saveparamslen;              /* Number of saving points */
+    char *ddb_filename;             /* Name of DDB file */
+    int ddb_compression;            /* Use compression in DDB? */
+    int ddb_checksum;               /* Use DDB checksum? */
+    time_t lastsave;                /* Unix time of last successful save */
+    time_t lastbgsave_try;          /* Unix time of last attempted bgsave */
+    time_t ddb_save_time_last;      /* Time used by last DDB save run. */
+    time_t ddb_save_time_start;     /* Current DDB save start time. */
+    int ddb_child_type;             /* Type of save by active child. */
+    int lastbgsave_status;          /* C_OK or C_ERR */
+    int stop_writes_on_bgsave_err;  /* Don't allow writes if can't BGSAVE */
+    int ddb_pipe_write_result_to_parent; /* DDB pipes used to return the state */
+    int ddb_pipe_read_result_from_child; /* of each slave in diskless SYNC. */
 };
 
 typedef void serverCommandProc(client *c);
@@ -678,6 +714,9 @@ void startLoading(FILE *fp);
 void loadingProgress(off_t pos);
 void stopLoading(void);
 
+/* DDB persistence */
+#include "ddb.h"
+
 /* Core functions */
 void flushServerData(void);
 int getMemoryWarningLevel(void);
@@ -755,6 +794,9 @@ void timeCommand(client *c);
 void commandCommand(client *c);
 void latencyCommand(client *c);
 void helloCommand(client *c);
+void lastsaveCommand(client *c);
+void saveCommand(client *c);
+void bgsaveCommand(client *c);
 void incrCommand(client *c);
 void getCommand(client *c);
 void countersCommand(client *c);

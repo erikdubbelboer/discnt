@@ -111,6 +111,7 @@ struct serverCommand serverCommandTable[] = {
     {"ping",pingCommand,-1,"rF",0,NULL,0,0,0,0,0},
     {"info",infoCommand,-1,"rl",0,NULL,0,0,0,0,0},
     {"shutdown",shutdownCommand,-1,"arl",0,NULL,0,0,0,0,0},
+    {"lastsave",lastsaveCommand,1,"rF",0,NULL,0,0,0,0,0},
     {"monitor",monitorCommand,1,"ar",0,NULL,0,0,0,0,0},
     {"debug",debugCommand,-2,"a",0,NULL,0,0,0,0,0},
     {"config",configCommand,-2,"ar",0,NULL,0,0,0,0,0},
@@ -120,6 +121,8 @@ struct serverCommand serverCommandTable[] = {
     {"command",commandCommand,0,"rl",0,NULL,0,0,0,0,0},
     {"latency",latencyCommand,-2,"arl",0,NULL,0,0,0,0,0},
     {"hello",helloCommand,1,"rF",0,NULL,0,0,0,0,0},
+    {"save",saveCommand,1,"ar",0,NULL,0,0,0,0,0},
+    {"bgsave",bgsaveCommand,1,"ar",0,NULL,0,0,0,0,0},
 
     /* Counter commands. */
     {"incr",incrCommand,3,"wmF",0,NULL,0,0,0,0,0},
@@ -157,7 +160,7 @@ void serverLogRaw(int level, const char *msg) {
         off = strftime(buf,sizeof(buf),"%d %b %H:%M:%S.",localtime(&tv.tv_sec));
         snprintf(buf+off,sizeof(buf)-off,"%03d",(int)tv.tv_usec/1000);
         if (pid != server.pid) {
-            role_char = 'C'; /* AOF writing child. */
+            role_char = 'C'; /* DDB writing child. */
         } else {
             role_char = 'P'; /* Parent child. */
         }
@@ -237,7 +240,7 @@ mstime_t randomTimeError(mstime_t milliseconds) {
     return rand()%milliseconds - milliseconds/2;
 }
 
-/* After an RDB dump or AOF rewrite we exit from children using _exit() instead of
+/* After a DDB dump we exit from children using _exit() instead of
  * exit(), because the latter may interact with the same file objects used by
  * the parent process. However if we are testing the coverage normal exit() is
  * used in order to obtain the right coverage information. */
@@ -467,7 +470,10 @@ int incrementallyRehash(void) {
  * for dict.c to resize the hash tables accordingly to the fact we have o not
  * running childs. */
 void updateDictResizePolicy(void) {
-    dictEnableResize();
+    if (server.ddb_child_pid == -1)
+        dictEnableResize();
+    else
+        dictDisableResize();
 }
 
 /* Remove all the server state and everything else to start
@@ -513,7 +519,7 @@ int clientsCronHandleTimeout(client *c) {
         !(c->flags & DISCNT_BLOCKED) &&  /* no timeout for blocked clients. */
         (now - c->lastinteraction > server.maxidletime))
     {
-        serverLog(DISCNT_VERBOSE,"Closing idle client");
+        serverLog(LL_VERBOSE,"Closing idle client");
         freeClient(c);
         return 1;
     } else if (c->flags & DISCNT_BLOCKED) {
@@ -592,14 +598,14 @@ void databasesCron(void) {
     /* Perform hash tables rehashing if needed, but only if there are no
      * other processes saving the DB on disk. Otherwise rehashing is bad
      * as will cause a lot of copy-on-write of memory pages. */
-    /*if (server.aof_child_pid == -1) {*/
+    if (server.ddb_child_pid == -1) {
         /* We use global counters so if we stop the computation at a given
          * DB we'll be able to start from the successive in the next
          * cron loop iteration. */
 
         tryResizeHashTables();
         incrementallyRehash();
-    /*}*/
+    }
 }
 
 /* We take a cached value of the unix time in the global state because with
@@ -633,6 +639,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     DISCNT_NOTUSED(eventLoop);
     DISCNT_NOTUSED(id);
     DISCNT_NOTUSED(clientData);
+    int j;
 
     /* Software watchdog: deliver the SIGALRM that will reach the signal
      * handler if we don't return here fast enough. */
@@ -659,19 +666,19 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     /* We received a SIGTERM, shutting down here in a safe way, as it is
      * not ok doing so inside the signal handler. */
     if (server.shutdown_asap) {
-        if (prepareForShutdown() == DISCNT_OK) exit(0);
-        serverLog(DISCNT_WARNING,"SIGTERM received but errors trying to shut down the server, check the logs for more information");
+        if (prepareForShutdown(SHUTDOWN_NOFLAGS) == DISCNT_OK) exit(0);
+        serverLog(LL_WARNING,"SIGTERM received but errors trying to shut down the server, check the logs for more information");
         server.shutdown_asap = 0;
     }
 
     /* Show information, */
     run_with_period(5000) {
-        serverLog(DISCNT_VERBOSE,
+        serverLog(LL_VERBOSE,
             "%lu clients connected, %zu bytes in use",
             listLength(server.clients),
             zmalloc_used_memory());
 
-        serverLog(DISCNT_VERBOSE,"DB: %lu keys in %lu slots HT.",dictSize(server.counters),dictSlots(server.counters));
+        serverLog(LL_VERBOSE,"DB: %lu keys in %lu slots HT.",dictSize(server.counters),dictSlots(server.counters));
     }
 
     /* We need to do a few operations on clients asynchronously. */
@@ -686,6 +693,50 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
 
     run_with_period(100) {
         countersValueCron();
+    }
+
+    /* Check if a background saving in progress terminated. */
+    if (server.ddb_child_pid != -1) {
+        int statloc;
+        pid_t pid;
+
+        if ((pid = wait3(&statloc,WNOHANG,NULL)) != 0) {
+            int exitcode = WEXITSTATUS(statloc);
+            int bysignal = 0;
+
+            if (WIFSIGNALED(statloc)) bysignal = WTERMSIG(statloc);
+
+            if (pid == server.ddb_child_pid) {
+                backgroundSaveDoneHandler(exitcode,bysignal);
+            } else {
+                serverLog(LL_WARNING,
+                    "Warning, detected child with unmatched pid: %ld",
+                    (long)pid);
+            }
+            updateDictResizePolicy();
+        }
+    } else {
+        /* If there is not a background saving/rewrite in progress check if
+         * we have to save/rewrite now */
+         for (j = 0; j < server.saveparamslen; j++) {
+            struct saveparam *sp = server.saveparams+j;
+
+            /* Save if we reached the given amount of changes,
+             * the given amount of seconds, and if the latest bgsave was
+             * successful or if, in case of an error, at least
+             * DISCNT_BGSAVE_RETRY_DELAY seconds already elapsed. */
+            if (server.dirty >= sp->changes &&
+                server.unixtime-server.lastsave > sp->seconds &&
+                (server.unixtime-server.lastbgsave_try >
+                 DISCNT_BGSAVE_RETRY_DELAY ||
+                 server.lastbgsave_status == DISCNT_OK))
+            {
+                serverLog(LL_NOTICE,"%d changes in %d seconds. Saving...",
+                    sp->changes, (int)sp->seconds);
+                ddbSaveBackground(server.ddb_filename);
+                break;
+            }
+        }
     }
 
     /* Close clients that need to be closed asynchronous */
@@ -753,7 +804,7 @@ void createSharedObjects(void) {
     shared.masterdownerr = createObject(DISCNT_STRING,sdsnew(
         "-MASTERDOWN Link with MASTER is down and slave-serve-stale-data is set to 'no'.\r\n"));
     shared.bgsaveerr = createObject(DISCNT_STRING,sdsnew(
-        "-MISCONF Discnt is configured to save RDB snapshots, but is currently not able to persist on disk. Commands that may modify the data set are disabled. Please check Discnt logs for details about the error.\r\n"));
+        "-MISCONF Discnt is configured to save DDB snapshots, but is currently not able to persist on disk. Commands that may modify the data set are disabled. Please check Discnt logs for details about the error.\r\n"));
     shared.roslaveerr = createObject(DISCNT_STRING,sdsnew(
         "-READONLY You can't write against a read only slave.\r\n"));
     shared.noautherr = createObject(DISCNT_STRING,sdsnew(
@@ -814,6 +865,7 @@ void initServerConfig(void) {
     server.tcpkeepalive = DISCNT_DEFAULT_TCP_KEEPALIVE;
     server.active_expire_enabled = 1;
     server.client_max_querybuf_len = DISCNT_MAX_QUERYBUF_LEN;
+    server.saveparams = NULL;
     server.loading = 0;
     server.logfile = zstrdup(DISCNT_DEFAULT_LOGFILE);
     server.syslog_enabled = DISCNT_DEFAULT_SYSLOG_ENABLED;
@@ -821,7 +873,11 @@ void initServerConfig(void) {
     server.syslog_facility = LOG_LOCAL0;
     server.daemonize = DISCNT_DEFAULT_DAEMONIZE;
     server.pidfile = zstrdup(DISCNT_DEFAULT_PID_FILE);
+    server.ddb_filename = zstrdup(DISCNT_DEFAULT_DDB_FILENAME);
     server.requirepass = NULL;
+    server.ddb_compression = DISCNT_DEFAULT_DDB_COMPRESSION;
+    server.ddb_checksum = DISCNT_DEFAULT_DDB_CHECKSUM;
+    server.stop_writes_on_bgsave_err = DISCNT_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR;
     server.activerehashing = DISCNT_DEFAULT_ACTIVE_REHASHING;
     server.maxclients = DISCNT_MAX_CLIENTS;
     server.precision = DISCNT_PRECISION;
@@ -834,6 +890,11 @@ void initServerConfig(void) {
     server.cluster_configfile = zstrdup(DISCNT_DEFAULT_CLUSTER_CONFIG_FILE);
     server.next_client_id = 1; /* Client IDs, start from 1 .*/
     server.loading_process_events_interval_bytes = (1024*1024*2);
+
+    resetServerSaveParams();
+    appendServerSaveParams(60*60,1); /* save after 1 hour and 1 change */
+    appendServerSaveParams(300,100); /* save after 5 minutes and 100 changes */
+    appendServerSaveParams(60,10000); /* save after 1 minute and 10000 changes */
 
     /* Client output buffer limits */
     for (j = 0; j < DISCNT_CLIENT_TYPE_COUNT; j++)
@@ -881,7 +942,7 @@ void adjustOpenFilesLimit(void) {
     struct rlimit limit;
 
     if (getrlimit(RLIMIT_NOFILE,&limit) == -1) {
-        serverLog(DISCNT_WARNING,"Unable to obtain the current NOFILE limit (%s), assuming 1024 and setting the max clients configuration accordingly.",
+        serverLog(LL_WARNING,"Unable to obtain the current NOFILE limit (%s), assuming 1024 and setting the max clients configuration accordingly.",
             strerror(errno));
         server.maxclients = 1024-DISCNT_MIN_RESERVED_FDS;
     } else {
@@ -918,7 +979,7 @@ void adjustOpenFilesLimit(void) {
                 int old_maxclients = server.maxclients;
                 server.maxclients = f-DISCNT_MIN_RESERVED_FDS;
                 if (server.maxclients < 1) {
-                    serverLog(DISCNT_WARNING,"Your current 'ulimit -n' "
+                    serverLog(LL_WARNING,"Your current 'ulimit -n' "
                         "of %llu is not enough for Discnt to start. "
                         "Please increase your open file limit to at least "
                         "%llu. Exiting.",
@@ -926,20 +987,20 @@ void adjustOpenFilesLimit(void) {
                         (unsigned long long) maxfiles);
                     exit(1);
                 }
-                serverLog(DISCNT_WARNING,"You requested maxclients of %d "
+                serverLog(LL_WARNING,"You requested maxclients of %d "
                     "requiring at least %llu max file descriptors.",
                     old_maxclients,
                     (unsigned long long) maxfiles);
-                serverLog(DISCNT_WARNING,"Discnt can't set maximum open files "
+                serverLog(LL_WARNING,"Discnt can't set maximum open files "
                     "to %llu because of OS error: %s.",
                     (unsigned long long) maxfiles, strerror(setrlimit_error));
-                serverLog(DISCNT_WARNING,"Current maximum open files is %llu. "
+                serverLog(LL_WARNING,"Current maximum open files is %llu. "
                     "maxclients has been reduced to %d to compensate for "
                     "low ulimit. "
                     "If you need higher maxclients increase 'ulimit -n'.",
                     (unsigned long long) oldlimit, server.maxclients);
             } else {
-                serverLog(DISCNT_NOTICE,"Increased maximum number of open files "
+                serverLog(LL_NOTICE,"Increased maximum number of open files "
                     "to %llu (it was originally set to %llu).",
                     (unsigned long long) maxfiles,
                     (unsigned long long) oldlimit);
@@ -958,7 +1019,7 @@ void checkTcpBacklogSettings(void) {
     if (fgets(buf,sizeof(buf),fp) != NULL) {
         int somaxconn = atoi(buf);
         if (somaxconn > 0 && somaxconn < server.tcp_backlog) {
-            serverLog(DISCNT_WARNING,"WARNING: The TCP backlog setting of %d cannot be enforced because /proc/sys/net/core/somaxconn is set to the lower value of %d.", server.tcp_backlog, somaxconn);
+            serverLog(LL_WARNING,"WARNING: The TCP backlog setting of %d cannot be enforced because /proc/sys/net/core/somaxconn is set to the lower value of %d.", server.tcp_backlog, somaxconn);
         }
     }
     fclose(fp);
@@ -1019,7 +1080,7 @@ int listenToPort(int port, int *fds, int *count) {
                 server.tcp_backlog);
         }
         if (fds[*count] == ANET_ERR) {
-            serverLog(DISCNT_WARNING,
+            serverLog(LL_WARNING,
                 "Creating Server TCP listening socket %s:%d: %s",
                 server.bindaddr[j] ? server.bindaddr[j] : "*",
                 port, server.neterr);
@@ -1039,6 +1100,8 @@ void resetServerStats(void) {
 
     server.stat_numcommands = 0;
     server.stat_numconnections = 0;
+    server.stat_fork_time = 0;
+    server.stat_fork_rate = 0;
     server.stat_rejected_conn = 0;
     for (j = 0; j < DISCNT_METRIC_COUNT; j++) {
         server.inst_metric[j].idx = 0;
@@ -1088,7 +1151,7 @@ void initServer(void) {
         server.sofd = anetUnixServer(server.neterr,server.unixsocket,
             server.unixsocketperm, server.tcp_backlog);
         if (server.sofd == ANET_ERR) {
-            serverLog(DISCNT_WARNING, "Opening socket: %s", server.neterr);
+            serverLog(LL_WARNING, "Opening socket: %s", server.neterr);
             exit(1);
         }
         anetNonBlock(NULL,server.sofd);
@@ -1096,13 +1159,20 @@ void initServer(void) {
 
     /* Abort if there are no listening sockets at all. */
     if (server.ipfd_count == 0 && server.sofd < 0) {
-        serverLog(DISCNT_WARNING, "Configured to not listen anywhere, exiting.");
+        serverLog(LL_WARNING, "Configured to not listen anywhere, exiting.");
         exit(1);
     }
 
     /* Create the Discnt data structures, and init other internal state. */
     server.counters = dictCreate(&counterDictType,NULL);
     server.cronloops = 0;
+    server.ddb_child_pid = -1;
+    server.ddb_child_type = DDB_CHILD_TYPE_NONE;
+    server.lastsave = time(NULL); /* At startup we consider the DB saved. */
+    server.lastbgsave_try = 0;    /* At startup we never tried to BGSAVE. */
+    server.ddb_save_time_last = -1;
+    server.ddb_save_time_start = -1;
+    server.dirty = 0;
     resetServerStats();
 
     /* A few stats we don't want to reset: server startup time, and peak mem. */
@@ -1136,7 +1206,7 @@ void initServer(void) {
      * at 3 GB using maxmemory with 'noeviction' policy'. This avoids
      * useless crashes of the Discnt instance for out of memory. */
     if (server.arch_bits == 32 && server.maxmemory == 0) {
-        serverLog(DISCNT_WARNING,"Warning: 32 bit instance detected but no memory limit set. Setting 3 GB maxmemory limit with 'noeviction' policy now.");
+        serverLog(LL_WARNING,"Warning: 32 bit instance detected but no memory limit set. Setting 3 GB maxmemory limit with 'noeviction' policy now.");
         server.maxmemory = 3072LL*(1024*1024); /* 3 GB */
     }
 
@@ -1331,6 +1401,18 @@ int processCommand(client *c) {
         }
     }
 
+    /* Don't accept write commands if there are problems persisting on disk
+     * and if this is a master instance. */
+    if ((server.stop_writes_on_bgsave_err &&
+        server.saveparamslen > 0 &&
+        server.lastbgsave_status == DISCNT_ERR) &&
+        (c->cmd->flags & DISCNT_CMD_WRITE ||
+         c->cmd->proc == pingCommand))
+    {
+        addReply(c, shared.bgsaveerr);
+        return DISCNT_OK;
+    }
+
     /* Loading DB? Return an error if the command has not the
      * DISCNT_CMD_LOADING flag. */
     if (server.loading && !(c->cmd->flags & DISCNT_CMD_LOADING)) {
@@ -1353,23 +1435,47 @@ void closeListeningSockets(int unlink_unix_socket) {
     if (server.sofd != -1) close(server.sofd);
     for (j = 0; j < server.cfd_count; j++) close(server.cfd[j]);
     if (unlink_unix_socket && server.unixsocket) {
-        serverLog(DISCNT_NOTICE,"Removing the unix socket file.");
+        serverLog(LL_NOTICE,"Removing the unix socket file.");
         unlink(server.unixsocket); /* don't care if this fails */
     }
 }
 
 /* Performs the operations needed to shutdown correctly the server */
-int prepareForShutdown() {
-    serverLog(DISCNT_WARNING,"User requested shutdown...");
-    
+int prepareForShutdown(int flags) {
+    int save = flags & SHUTDOWN_SAVE;
+    int nosave = flags & SHUTDOWN_NOSAVE;
+
+    serverLog(LL_WARNING,"User requested shutdown...");
+
+    /* Kill the saving child if there is a background saving in progress.
+       We want to avoid race conditions, for instance our saving child may
+       overwrite the synchronous saving did by SHUTDOWN. */
+    if (server.ddb_child_pid != -1) {
+        serverLog(LL_WARNING,"There is a child saving an .ddb. Killing it!");
+        kill(server.ddb_child_pid,SIGUSR1);
+        ddbRemoveTempFile(server.ddb_child_pid);
+    }
+    if ((server.saveparamslen > 0 && !nosave) || save) {
+        serverLog(LL_NOTICE,"Saving the final DDB snapshot before exiting.");
+        /* Snapshotting. Perform a SYNC SAVE and exit */
+        if (ddbSave(server.ddb_filename) != DISCNT_OK) {
+            /* Ooops.. error saving! The best we can do is to continue
+             * operating. Note that if there was a background saving process,
+             * in the next cron() Redis will be notified that the background
+             * saving aborted, handling special stuff like slaves pending for
+             * synchronization... */
+            serverLog(LL_WARNING,"Error trying to save the DB, can't exit.");
+            return DISCNT_ERR;
+        }
+    }
     if (server.daemonize) {
-        serverLog(DISCNT_NOTICE,"Removing the pid file.");
+        serverLog(LL_NOTICE,"Removing the pid file.");
         unlink(server.pidfile);
     }
 
     /* Close the listening sockets. Apparently this allows faster restarts. */
     closeListeningSockets(1);
-    serverLog(DISCNT_WARNING,"Discnt is now ready to exit, bye bye...");
+    serverLog(LL_WARNING,"Discnt is now ready to exit, bye bye...");
     return DISCNT_OK;
 }
 
@@ -1461,13 +1567,34 @@ void timeCommand(client *c) {
 }
 
 void shutdownCommand(client *c) {
-    if (c->argc > 1) {
+    int flags = 0;
+
+    if (c->argc > 2) {
         addReply(c,shared.syntaxerr);
         return;
+    } else if (c->argc == 2) {
+        if (!strcasecmp(c->argv[1]->ptr,"nosave")) {
+            flags |= SHUTDOWN_NOSAVE;
+        } else if (!strcasecmp(c->argv[1]->ptr,"save")) {
+            flags |= SHUTDOWN_SAVE;
+        } else {
+            addReply(c,shared.syntaxerr);
+            return;
+        }
     }
-
-    if (prepareForShutdown() == DISCNT_OK) exit(0);
+    /* When SHUTDOWN is called while the server is loading a dataset in
+     * memory we need to make sure no attempt is performed to save
+     * the dataset on shutdown (otherwise it could overwrite the current DB
+     * with half-read data).
+     */
+    if (server.loading)
+        flags = (flags & ~SHUTDOWN_SAVE) | SHUTDOWN_NOSAVE;
+    if (prepareForShutdown(flags) == DISCNT_OK) exit(0);
     addReplyError(c,"Errors trying to SHUTDOWN. Check logs.");
+}
+
+void lastsaveCommand(client *c) {
+    addReplyLongLong(c,server.lastsave);
 }
 
 /* Helper function for addReplyCommand() to output flags. */
@@ -1701,8 +1828,21 @@ sds genDiscntInfoString(char *section) {
         if (sections++) info = sdscat(info,"\r\n");
         info = sdscatprintf(info,
             "# Persistence\r\n"
-            "loading:%d\r\n",
-            server.loading);
+            "loading:%d\r\n"
+            "ddb_changes_since_last_save:%lld\r\n"
+            "ddb_bgsave_in_progress:%d\r\n"
+            "ddb_last_save_time:%jd\r\n"
+            "ddb_last_bgsave_status:%s\r\n"
+            "ddb_last_bgsave_time_sec:%jd\r\n"
+            "ddb_current_bgsave_time_sec:%jd\r\n",
+            server.loading,
+            server.dirty,
+            server.ddb_child_pid != -1,
+            (intmax_t)server.lastsave,
+            (server.lastbgsave_status == DISCNT_OK) ? "ok" : "err",
+            (intmax_t)server.ddb_save_time_last,
+            (intmax_t)((server.ddb_child_pid == -1) ?
+                -1 : time(NULL)-server.ddb_save_time_start));
 
         if (server.loading) {
             double perc;
@@ -1748,7 +1888,8 @@ sds genDiscntInfoString(char *section) {
             "total_net_output_bytes:%lld\r\n"
             "instantaneous_input_kbps:%.2f\r\n"
             "instantaneous_output_kbps:%.2f\r\n"
-            "rejected_connections:%lld\r\n",
+            "rejected_connections:%lld\r\n"
+            "latest_fork_usec:%lld\r\n",
             server.stat_numconnections,
             server.stat_numcommands,
             getInstantaneousMetric(DISCNT_METRIC_COMMAND),
@@ -1756,7 +1897,8 @@ sds genDiscntInfoString(char *section) {
             server.stat_net_output_bytes,
             (float)getInstantaneousMetric(DISCNT_METRIC_NET_INPUT)/1024,
             (float)getInstantaneousMetric(DISCNT_METRIC_NET_OUTPUT)/1024,
-            server.stat_rejected_conn);
+            server.stat_rejected_conn,
+            server.stat_fork_time);
     }
 
     /* CPU */
@@ -1853,7 +1995,7 @@ int linuxOvercommitMemoryValue(void) {
 
 void linuxOvercommitMemoryWarning(void) {
     if (linuxOvercommitMemoryValue() == 0) {
-        serverLog(DISCNT_WARNING,"WARNING overcommit_memory is set to 0! Background save may fail under low memory condition. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.");
+        serverLog(LL_WARNING,"WARNING overcommit_memory is set to 0! Background save may fail under low memory condition. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.");
     }
 }
 #endif /* __linux__ */
@@ -1915,7 +2057,7 @@ void discntAsciiArt(void) {
     char *buf = zmalloc(1024*16);
 
     if (server.syslog_enabled) {
-        serverLog(DISCNT_NOTICE,
+        serverLog(LL_NOTICE,
             "Discnt %s (%s/%d) %s bit, port %d, pid %ld ready to start.",
             DISCNT_VERSION,
             discntGitSHA1(),
@@ -1933,7 +2075,7 @@ void discntAsciiArt(void) {
             server.port,
             (long) getpid()
         );
-        serverLogRaw(DISCNT_NOTICE|DISCNT_LOG_RAW,buf);
+        serverLogRaw(LL_NOTICE|DISCNT_LOG_RAW,buf);
     }
     zfree(buf);
 }
@@ -1957,13 +2099,14 @@ static void sigShutdownHandler(int sig) {
      * the user really wanting to quit ASAP without waiting to persist
      * on disk. */
     if (server.shutdown_asap && sig == SIGINT) {
-        serverLogFromHandler(DISCNT_WARNING, "You insist... exiting now.");
+        serverLogFromHandler(LL_WARNING, "You insist... exiting now.");
+        ddbRemoveTempFile(getpid());
         exit(1); /* Exit with an error since this was not a clean shutdown. */
     } else if (server.loading) {
         exit(0);
     }
 
-    serverLogFromHandler(DISCNT_WARNING, msg);
+    serverLogFromHandler(LL_WARNING, msg);
     server.shutdown_asap = 1;
 }
 
@@ -1992,12 +2135,19 @@ void setupSignalHandlers(void) {
 
 void memtest(size_t megabytes, int passes);
 
-/* Function called at startup to load RDB or AOF file in memory. */
 void loadDataFromDisk(void) {
+  long long start = ustime();
+  if (ddbLoad(server.ddb_filename) == DISCNT_OK) {
+    serverLog(LL_NOTICE,"DB loaded from disk: %.3f seconds",
+        (float)(ustime()-start)/1000000);
+  } else if (errno != ENOENT) {
+    serverLog(LL_WARNING,"Fatal error loading the DB: %s. Exiting.",strerror(errno));
+    exit(1);
+  }
 }
 
 void serverOutOfMemoryHandler(size_t allocation_size) {
-    serverLog(DISCNT_WARNING,"Out Of Memory allocating %zu bytes!",
+    serverLog(LL_WARNING,"Out Of Memory allocating %zu bytes!",
         allocation_size);
     serverPanic("Discnt aborting for OUT OF MEMORY");
 }
@@ -2073,7 +2223,7 @@ int main(int argc, char **argv) {
         loadServerConfig(configfile,options);
         sdsfree(options);
     } else {
-        serverLog(DISCNT_WARNING, "Warning: no config file specified, using the default config. In order to specify a config file use %s /path/to/discnt.conf", argv[0]);
+        serverLog(LL_WARNING, "Warning: no config file specified, using the default config. In order to specify a config file use %s /path/to/discnt.conf", argv[0]);
     }
     if (server.daemonize) daemonize();
     initServer();
@@ -2082,20 +2232,20 @@ int main(int argc, char **argv) {
     discntAsciiArt();
 
     /* Things not needed when running in Sentinel mode. */
-    serverLog(DISCNT_WARNING,"Server started, Discnt version " DISCNT_VERSION);
+    serverLog(LL_WARNING,"Server started, Discnt version " DISCNT_VERSION);
 #ifdef __linux__
     linuxOvercommitMemoryWarning();
 #endif
     checkTcpBacklogSettings();
     loadDataFromDisk();
     if (server.ipfd_count > 0)
-        serverLog(DISCNT_NOTICE,"The server is now ready to accept connections on port %d", server.port);
+        serverLog(LL_NOTICE,"The server is now ready to accept connections on port %d", server.port);
     if (server.sofd > 0)
-        serverLog(DISCNT_NOTICE,"The server is now ready to accept connections at %s", server.unixsocket);
+        serverLog(LL_NOTICE,"The server is now ready to accept connections at %s", server.unixsocket);
 
     /* Warning the user about suspicious maxmemory setting. */
     if (server.maxmemory > 0 && server.maxmemory < 1024*1024) {
-        serverLog(DISCNT_WARNING,"WARNING: You specified a maxmemory value that is less than 1MB (current value is %llu bytes). Are you sure this is what you really want?", server.maxmemory);
+        serverLog(LL_WARNING,"WARNING: You specified a maxmemory value that is less than 1MB (current value is %llu bytes). Are you sure this is what you really want?", server.maxmemory);
     }
 
     aeSetBeforeSleepProc(server.el,beforeSleep);

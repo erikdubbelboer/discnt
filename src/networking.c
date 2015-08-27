@@ -558,7 +558,7 @@ void copyClientOutputBuffer(client *dst, client *src) {
 static void acceptCommonHandler(int fd, int flags) {
     client *c;
     if ((c = createClient(fd)) == NULL) {
-        serverLog(DISCNT_WARNING,
+        serverLog(LL_WARNING,
             "Error registering fd event for the new client: %s (fd=%d)",
             strerror(errno),fd);
         close(fd); /* May be already closed, just ignore errors */
@@ -594,11 +594,11 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
         cfd = anetTcpAccept(server.neterr, fd, cip, sizeof(cip), &cport);
         if (cfd == ANET_ERR) {
             if (errno != EWOULDBLOCK)
-                serverLog(DISCNT_WARNING,
+                serverLog(LL_WARNING,
                     "Accepting client connection: %s", server.neterr);
             return;
         }
-        serverLog(DISCNT_VERBOSE,"Accepted %s:%d", cip, cport);
+        serverLog(LL_VERBOSE,"Accepted %s:%d", cip, cport);
         acceptCommonHandler(cfd,0);
     }
 }
@@ -613,11 +613,11 @@ void acceptUnixHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
         cfd = anetUnixAccept(server.neterr, fd);
         if (cfd == ANET_ERR) {
             if (errno != EWOULDBLOCK)
-                serverLog(DISCNT_WARNING,
+                serverLog(LL_WARNING,
                     "Accepting client connection: %s", server.neterr);
             return;
         }
-        serverLog(DISCNT_VERBOSE,"Accepted connection to %s", server.unixsocket);
+        serverLog(LL_VERBOSE,"Accepted connection to %s", server.unixsocket);
         acceptCommonHandler(cfd,DISCNT_UNIX_SOCKET);
     }
 }
@@ -773,7 +773,7 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         if (errno == EAGAIN) {
             nwritten = 0;
         } else {
-            serverLog(DISCNT_VERBOSE,
+            serverLog(LL_VERBOSE,
                 "Error writing to client: %s", strerror(errno));
             freeClient(c);
             return;
@@ -853,9 +853,9 @@ int processInlineBuffer(client *c) {
 /* Helper function. Trims query buffer to make the function that processes
  * multi bulk requests idempotent. */
 static void setProtocolError(client *c, int pos) {
-    if (server.verbosity >= DISCNT_VERBOSE) {
+    if (server.verbosity >= LL_VERBOSE) {
         sds client = catClientInfoString(sdsempty(),c);
-        serverLog(DISCNT_VERBOSE,
+        serverLog(LL_VERBOSE,
             "Protocol error from client: %s", client);
         sdsfree(client);
     }
@@ -1075,12 +1075,12 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         if (errno == EAGAIN) {
             return;
         } else {
-            serverLog(DISCNT_VERBOSE, "Reading from client: %s",strerror(errno));
+            serverLog(LL_VERBOSE, "Reading from client: %s",strerror(errno));
             freeClient(c);
             return;
         }
     } else if (nread == 0) {
-        serverLog(DISCNT_VERBOSE, "Client closed connection");
+        serverLog(LL_VERBOSE, "Client closed connection");
         freeClient(c);
         return;
     }
@@ -1092,7 +1092,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         sds ci = catClientInfoString(sdsempty(),c), bytes = sdsempty();
 
         bytes = sdscatrepr(bytes,c->querybuf,64);
-        serverLog(DISCNT_WARNING,"Closing client that reached max query buffer length: %s (qbuf initial bytes: %s)", ci, bytes);
+        serverLog(LL_WARNING,"Closing client that reached max query buffer length: %s (qbuf initial bytes: %s)", ci, bytes);
         sdsfree(ci);
         sdsfree(bytes);
         freeClient(c);
@@ -1515,7 +1515,7 @@ void asyncCloseClientOnOutputBufferLimitReached(client *c) {
         sds client = catClientInfoString(sdsempty(),c);
 
         freeClientAsync(c);
-        serverLog(DISCNT_WARNING,"Client %s scheduled to be closed ASAP for overcoming of output buffer limits.", client);
+        serverLog(LL_WARNING,"Client %s scheduled to be closed ASAP for overcoming of output buffer limits.", client);
         sdsfree(client);
     }
 }

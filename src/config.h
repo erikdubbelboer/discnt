@@ -77,7 +77,14 @@
 #endif
 #endif
 
-/* Define rdb_fsync_range to sync_file_range() on Linux, otherwise we use
+/* Define aof_fsync to fdatasync() in Linux and fsync() for all the rest */
+#ifdef __linux__
+#define aof_fsync fdatasync
+#else
+#define aof_fsync fsync
+#endif
+
+/* Define ddb_fsync_range to sync_file_range() on Linux, otherwise we use
  * the plain fsync() call. */
 #ifdef __linux__
 #include <linux/version.h>
@@ -94,9 +101,9 @@
 #endif
 
 #ifdef HAVE_SYNC_FILE_RANGE
-#define rdb_fsync_range(fd,off,size) sync_file_range(fd,off,size,SYNC_FILE_RANGE_WAIT_BEFORE|SYNC_FILE_RANGE_WRITE)
+#define ddb_fsync_range(fd,off,size) sync_file_range(fd,off,size,SYNC_FILE_RANGE_WAIT_BEFORE|SYNC_FILE_RANGE_WRITE)
 #else
-#define rdb_fsync_range(fd,off,size) fsync(fd)
+#define ddb_fsync_range(fd,off,size) fsync(fd)
 #endif
 
 /* Check if we can use setproctitle().

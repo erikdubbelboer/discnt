@@ -50,6 +50,85 @@
 
 /* ================================= Debugging ============================== */
 
+/* Compute the sha1 of string at 's' with 'len' bytes long.
+ * The SHA1 is then xored against the string pointed by digest.
+ * Since xor is commutative, this operation is used in order to
+ * "add" digests relative to unordered elements.
+ *
+ * So digest(a,b,c,d) will be the same of digest(b,a,c,d) */
+void xorDigest(unsigned char *digest, void *ptr, size_t len) {
+    SHA1_CTX ctx;
+    unsigned char hash[20], *s = ptr;
+    int j;
+
+    SHA1Init(&ctx);
+    SHA1Update(&ctx,s,len);
+    SHA1Final(hash,&ctx);
+
+    for (j = 0; j < 20; j++)
+        digest[j] ^= hash[j];
+}
+
+/* This function instead of just computing the SHA1 and xoring it
+ * against digest, also perform the digest of "digest" itself and
+ * replace the old value with the new one.
+ *
+ * So the final digest will be:
+ *
+ * digest = SHA1(digest xor SHA1(data))
+ *
+ * This function is used every time we want to preserve the order so
+ * that digest(a,b,c,d) will be different than digest(b,c,d,a)
+ *
+ * Also note that mixdigest("foo") followed by mixdigest("bar")
+ * will lead to a different digest compared to "fo", "obar".
+ */
+void mixDigest(unsigned char *digest, void *ptr, size_t len) {
+    SHA1_CTX ctx;
+    char *s = ptr;
+
+    xorDigest(digest,s,len);
+    SHA1Init(&ctx);
+    SHA1Update(&ctx,digest,20);
+    SHA1Final(digest,&ctx);
+}
+
+/* Compute the dataset digest. Since keys, sets elements, hashes elements
+ * are not ordered, we use a trick: every aggregate digest is the xor
+ * of the digests of their elements. This way the order will not change
+ * the result. For list instead we use a feedback entering the output digest
+ * as input in order to ensure that a different ordered list will result in
+ * a different digest. */
+void computeDatasetDigest(unsigned char *final) {
+    unsigned char digest[20];
+    dictIterator *di = NULL;
+    dictEntry *de;
+
+    memset(final,0,20); /* Start with a clean result */
+
+    di = dictGetIterator(server.counters);
+
+    /* Iterate this DB writing every entry */
+    while((de = dictNext(di)) != NULL) {
+        counter* cntr;
+        sds key;
+
+        memset(digest,0,20); /* This key-val digest */
+
+        key = dictGetKey(de);
+        mixDigest(digest,key,sdslen(key));
+
+        cntr = dictGetVal(de);
+
+        mixDigest(digest,cntr->name,sdslen(cntr->name));
+        mixDigest(digest,&cntr->value,sizeof(cntr->value));
+
+        /* We can finally xor the key-val digest to the final digest */
+        xorDigest(final,digest,20);
+    }
+    dictReleaseIterator(di);
+}
+
 void debugCommand(client *c) {
     if (!strcasecmp(c->argv[1]->ptr,"segfault")) {
         *((char*)-1) = 'x';
@@ -60,9 +139,31 @@ void debugCommand(client *c) {
     } else if (!strcasecmp(c->argv[1]->ptr,"assert")) {
         if (c->argc >= 3) c->argv[2] = tryObjectEncoding(c->argv[2]);
         serverAssertWithInfo(c,c->argv[0],1 == 2);
+    } else if (!strcasecmp(c->argv[1]->ptr,"reload")) {
+        if (ddbSave(server.ddb_filename) != DISCNT_OK) {
+            addReply(c,shared.err);
+            return;
+        }
+        dictEmpty(server.counters, NULL);
+        if (ddbLoad(server.ddb_filename) != DISCNT_OK) {
+            addReplyError(c,"Error trying to load the DDB dump");
+            return;
+        }
+        serverLog(LL_WARNING,"DB reloaded by DEBUG RELOAD");
+        addReply(c,shared.ok);
     } else if (!strcasecmp(c->argv[1]->ptr,"flushall")) {
         flushServerData();
         addReply(c,shared.ok);
+    } else if (!strcasecmp(c->argv[1]->ptr,"digest") && c->argc == 2) {
+        unsigned char digest[20];
+        sds d = sdsempty();
+        int j;
+
+        computeDatasetDigest(digest);
+        for (j = 0; j < 20; j++)
+            d = sdscatprintf(d, "%02x",digest[j]);
+        addReplyStatus(c,d);
+        sdsfree(d);
     } else if (!strcasecmp(c->argv[1]->ptr,"sleep") && c->argc == 3) {
         double dtime = strtod(c->argv[2]->ptr,NULL);
         long long utime = dtime*1000000;
@@ -157,13 +258,13 @@ void debugCommand(client *c) {
 
 void _serverAssert(char *estr, char *file, int line) {
     bugReportStart();
-    serverLog(DISCNT_WARNING,"=== ASSERTION FAILED ===");
-    serverLog(DISCNT_WARNING,"==> %s:%d '%s' is not true",file,line,estr);
+    serverLog(LL_WARNING,"=== ASSERTION FAILED ===");
+    serverLog(LL_WARNING,"==> %s:%d '%s' is not true",file,line,estr);
 #ifdef HAVE_BACKTRACE
     server.assert_failed = estr;
     server.assert_file = file;
     server.assert_line = line;
-    serverLog(DISCNT_WARNING,"(forcing SIGSEGV to print the bug report.)");
+    serverLog(LL_WARNING,"(forcing SIGSEGV to print the bug report.)");
 #endif
     *((char*)-1) = 'x';
 }
@@ -172,10 +273,10 @@ void _serverAssertPrintClientInfo(client *c) {
     int j;
 
     bugReportStart();
-    serverLog(DISCNT_WARNING,"=== ASSERTION FAILED CLIENT CONTEXT ===");
-    serverLog(DISCNT_WARNING,"client->flags = %d", c->flags);
-    serverLog(DISCNT_WARNING,"client->fd = %d", c->fd);
-    serverLog(DISCNT_WARNING,"client->argc = %d", c->argc);
+    serverLog(LL_WARNING,"=== ASSERTION FAILED CLIENT CONTEXT ===");
+    serverLog(LL_WARNING,"client->flags = %d", c->flags);
+    serverLog(LL_WARNING,"client->fd = %d", c->fd);
+    serverLog(LL_WARNING,"client->argc = %d", c->argc);
     for (j=0; j < c->argc; j++) {
         char buf[128];
         char *arg;
@@ -187,26 +288,26 @@ void _serverAssertPrintClientInfo(client *c) {
                 c->argv[j]->type, c->argv[j]->encoding);
             arg = buf;
         }
-        serverLog(DISCNT_WARNING,"client->argv[%d] = \"%s\" (refcount: %d)",
+        serverLog(LL_WARNING,"client->argv[%d] = \"%s\" (refcount: %d)",
             j, arg, c->argv[j]->refcount);
     }
 }
 
 void _serverAssertPrintObject(robj *o) {
     bugReportStart();
-    serverLog(DISCNT_WARNING,"=== ASSERTION FAILED OBJECT CONTEXT ===");
+    serverLog(LL_WARNING,"=== ASSERTION FAILED OBJECT CONTEXT ===");
     serverLogObjectDebugInfo(o);
 }
 
 void serverLogObjectDebugInfo(robj *o) {
-    serverLog(DISCNT_WARNING,"Object type: %d", o->type);
-    serverLog(DISCNT_WARNING,"Object encoding: %d", o->encoding);
-    serverLog(DISCNT_WARNING,"Object refcount: %d", o->refcount);
+    serverLog(LL_WARNING,"Object type: %d", o->type);
+    serverLog(LL_WARNING,"Object encoding: %d", o->encoding);
+    serverLog(LL_WARNING,"Object refcount: %d", o->refcount);
     if (o->type == DISCNT_STRING && sdsEncodedObject(o)) {
-        serverLog(DISCNT_WARNING,"Object raw string len: %zu", sdslen(o->ptr));
+        serverLog(LL_WARNING,"Object raw string len: %zu", sdslen(o->ptr));
         if (sdslen(o->ptr) < 4096) {
             sds repr = sdscatrepr(sdsempty(),o->ptr,sdslen(o->ptr));
-            serverLog(DISCNT_WARNING,"Object raw string content: %s", repr);
+            serverLog(LL_WARNING,"Object raw string content: %s", repr);
             sdsfree(repr);
         }
     }
@@ -220,19 +321,19 @@ void _serverAssertWithInfo(client *c, robj *o, char *estr, char *file, int line)
 
 void _serverPanic(char *msg, char *file, int line) {
     bugReportStart();
-    serverLog(DISCNT_WARNING,"------------------------------------------------");
-    serverLog(DISCNT_WARNING,"!!! Software Failure. Press left mouse button to continue");
-    serverLog(DISCNT_WARNING,"Guru Meditation: %s #%s:%d",msg,file,line);
+    serverLog(LL_WARNING,"------------------------------------------------");
+    serverLog(LL_WARNING,"!!! Software Failure. Press left mouse button to continue");
+    serverLog(LL_WARNING,"Guru Meditation: %s #%s:%d",msg,file,line);
 #ifdef HAVE_BACKTRACE
-    serverLog(DISCNT_WARNING,"(forcing SIGSEGV in order to print the stack trace)");
+    serverLog(LL_WARNING,"(forcing SIGSEGV in order to print the stack trace)");
 #endif
-    serverLog(DISCNT_WARNING,"------------------------------------------------");
+    serverLog(LL_WARNING,"------------------------------------------------");
     *((char*)-1) = 'x';
 }
 
 void bugReportStart(void) {
     if (server.bug_report_start == 0) {
-        serverLog(DISCNT_WARNING,
+        serverLog(LL_WARNING,
             "\n\n=== DISCNT BUG REPORT START: Cut & paste starting from here ===");
         server.bug_report_start = 1;
     }
@@ -277,20 +378,20 @@ void logStackContent(void **sp) {
         unsigned long val = (unsigned long) sp[i];
 
         if (sizeof(long) == 4)
-            serverLog(DISCNT_WARNING, "(%08lx) -> %08lx", addr, val);
+            serverLog(LL_WARNING, "(%08lx) -> %08lx", addr, val);
         else
-            serverLog(DISCNT_WARNING, "(%016lx) -> %016lx", addr, val);
+            serverLog(LL_WARNING, "(%016lx) -> %016lx", addr, val);
     }
 }
 
 void logRegisters(ucontext_t *uc) {
-    serverLog(DISCNT_WARNING, "--- REGISTERS");
+    serverLog(LL_WARNING, "--- REGISTERS");
 
 /* OSX */
 #if defined(__APPLE__) && defined(MAC_OS_X_VERSION_10_6)
   /* OSX AMD64 */
     #if defined(_STRUCT_X86_THREAD_STATE64) && !defined(__i386__)
-    serverLog(DISCNT_WARNING,
+    serverLog(LL_WARNING,
     "\n"
     "RAX:%016lx RBX:%016lx\nRCX:%016lx RDX:%016lx\n"
     "RDI:%016lx RSI:%016lx\nRBP:%016lx RSP:%016lx\n"
@@ -322,7 +423,7 @@ void logRegisters(ucontext_t *uc) {
     logStackContent((void**)uc->uc_mcontext->__ss.__rsp);
     #else
     /* OSX x86 */
-    serverLog(DISCNT_WARNING,
+    serverLog(LL_WARNING,
     "\n"
     "EAX:%08lx EBX:%08lx ECX:%08lx EDX:%08lx\n"
     "EDI:%08lx ESI:%08lx EBP:%08lx ESP:%08lx\n"
@@ -351,7 +452,7 @@ void logRegisters(ucontext_t *uc) {
 #elif defined(__linux__)
     /* Linux x86 */
     #if defined(__i386__)
-    serverLog(DISCNT_WARNING,
+    serverLog(LL_WARNING,
     "\n"
     "EAX:%08lx EBX:%08lx ECX:%08lx EDX:%08lx\n"
     "EDI:%08lx ESI:%08lx EBP:%08lx ESP:%08lx\n"
@@ -377,7 +478,7 @@ void logRegisters(ucontext_t *uc) {
     logStackContent((void**)uc->uc_mcontext.gregs[7]);
     #elif defined(__X86_64__) || defined(__x86_64__)
     /* Linux AMD64 */
-    serverLog(DISCNT_WARNING,
+    serverLog(LL_WARNING,
     "\n"
     "RAX:%016lx RBX:%016lx\nRCX:%016lx RDX:%016lx\n"
     "RDI:%016lx RSI:%016lx\nRBP:%016lx RSP:%016lx\n"
@@ -407,7 +508,7 @@ void logRegisters(ucontext_t *uc) {
     logStackContent((void**)uc->uc_mcontext.gregs[15]);
     #endif
 #else
-    serverLog(DISCNT_WARNING,
+    serverLog(LL_WARNING,
         "  Dumping of registers not supported for this OS/arch");
 #endif
 }
@@ -449,15 +550,15 @@ void logCurrentClient(void) {
     sds client;
     int j;
 
-    serverLog(DISCNT_WARNING, "--- CURRENT CLIENT INFO");
+    serverLog(LL_WARNING, "--- CURRENT CLIENT INFO");
     client = catClientInfoString(sdsempty(),cc);
-    serverLog(DISCNT_WARNING,"client: %s", client);
+    serverLog(LL_WARNING,"client: %s", client);
     sdsfree(client);
     for (j = 0; j < cc->argc; j++) {
         robj *decoded;
 
         decoded = getDecodedObject(cc->argv[j]);
-        serverLog(DISCNT_WARNING,"argv[%d]: '%s'", j, (char*)decoded->ptr);
+        serverLog(LL_WARNING,"argv[%d]: '%s'", j, (char*)decoded->ptr);
         decrRefCount(decoded);
     }
 }
@@ -552,25 +653,25 @@ void sigsegvHandler(int sig, siginfo_t *info, void *secret) {
     DISCNT_NOTUSED(info);
 
     bugReportStart();
-    serverLog(DISCNT_WARNING,
+    serverLog(LL_WARNING,
         "    Discnt %s crashed by signal: %d", DISCNT_VERSION, sig);
-    serverLog(DISCNT_WARNING,
+    serverLog(LL_WARNING,
         "    Failed assertion: %s (%s:%d)", server.assert_failed,
                         server.assert_file, server.assert_line);
 
     /* Log the stack trace */
-    serverLog(DISCNT_WARNING, "--- STACK TRACE");
+    serverLog(LL_WARNING, "--- STACK TRACE");
     logStackTrace(uc);
 
     /* Log INFO and CLIENT LIST */
-    serverLog(DISCNT_WARNING, "--- INFO OUTPUT");
+    serverLog(LL_WARNING, "--- INFO OUTPUT");
     infostring = genDiscntInfoString("all");
     infostring = sdscatprintf(infostring, "hash_init_value: %u\n",
         dictGetHashFunctionSeed());
-    serverLogRaw(DISCNT_WARNING, infostring);
-    serverLog(DISCNT_WARNING, "--- CLIENT LIST OUTPUT");
+    serverLogRaw(LL_WARNING, infostring);
+    serverLog(LL_WARNING, "--- CLIENT LIST OUTPUT");
     clients = getAllClientsInfoString();
-    serverLogRaw(DISCNT_WARNING, clients);
+    serverLogRaw(LL_WARNING, clients);
     sdsfree(infostring);
     sdsfree(clients);
 
@@ -582,18 +683,18 @@ void sigsegvHandler(int sig, siginfo_t *info, void *secret) {
 
 #if defined(HAVE_PROC_MAPS)
     /* Test memory */
-    serverLog(DISCNT_WARNING, "--- FAST MEMORY TEST");
+    serverLog(LL_WARNING, "--- FAST MEMORY TEST");
     bioKillThreads();
     if (memtest_test_linux_anonymous_maps()) {
-        serverLog(DISCNT_WARNING,
+        serverLog(LL_WARNING,
             "!!! MEMORY ERROR DETECTED! Check your memory ASAP !!!");
     } else {
-        serverLog(DISCNT_WARNING,
+        serverLog(LL_WARNING,
             "Fast memory test PASSED, however your memory can still be broken. Please run a memory test for several hours if possible.");
     }
 #endif
 
-    serverLog(DISCNT_WARNING,
+    serverLog(LL_WARNING,
 "\n=== DISCNT BUG REPORT END. Make sure to include from START to END. ===\n\n"
 "       Please report the crash by opening an issue on github:\n\n"
 "           http://github.com/antirez/discnt/issues\n\n"
@@ -646,13 +747,13 @@ void watchdogSignalHandler(int sig, siginfo_t *info, void *secret) {
     DISCNT_NOTUSED(info);
     DISCNT_NOTUSED(sig);
 
-    serverLogFromHandler(DISCNT_WARNING,"\n--- WATCHDOG TIMER EXPIRED ---");
+    serverLogFromHandler(LL_WARNING,"\n--- WATCHDOG TIMER EXPIRED ---");
 #ifdef HAVE_BACKTRACE
     logStackTrace(uc);
 #else
-    serverLogFromHandler(DISCNT_WARNING,"Sorry: no support for backtrace().");
+    serverLogFromHandler(LL_WARNING,"Sorry: no support for backtrace().");
 #endif
-    serverLogFromHandler(DISCNT_WARNING,"--------\n");
+    serverLogFromHandler(LL_WARNING,"--------\n");
 }
 
 /* Schedule a SIGALRM delivery after the specified period in milliseconds.

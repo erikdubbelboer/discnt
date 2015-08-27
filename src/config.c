@@ -64,6 +64,19 @@ int yesnotoi(char *s) {
     else return -1;
 }
 
+void appendServerSaveParams(time_t seconds, int changes) {
+    server.saveparams = zrealloc(server.saveparams,sizeof(struct saveparam)*(server.saveparamslen+1));
+    server.saveparams[server.saveparamslen].seconds = seconds;
+    server.saveparams[server.saveparamslen].changes = changes;
+    server.saveparamslen++;
+}
+
+void resetServerSaveParams(void) {
+    zfree(server.saveparams);
+    server.saveparams = NULL;
+    server.saveparamslen = 0;
+}
+
 void loadServerConfigFromString(char *config) {
     char *err = NULL;
     int linenum = 0, totlines, i;
@@ -133,17 +146,28 @@ void loadServerConfigFromString(char *config) {
             if (errno || server.unixsocketperm > 0777) {
                 err = "Invalid socket file permissions"; goto loaderr;
             }
+        } else if (!strcasecmp(argv[0],"save")) {
+            if (argc == 3) {
+                int seconds = atoi(argv[1]);
+                int changes = atoi(argv[2]);
+                if (seconds < 1 || changes < 0) {
+                    err = "Invalid save parameters"; goto loaderr;
+                }
+                appendServerSaveParams(seconds,changes);
+            } else if (argc == 2 && !strcasecmp(argv[1],"")) {
+                resetServerSaveParams();
+            }
         } else if (!strcasecmp(argv[0],"dir") && argc == 2) {
             if (chdir(argv[1]) == -1) {
-                serverLog(DISCNT_WARNING,"Can't chdir to '%s': %s",
+                serverLog(LL_WARNING,"Can't chdir to '%s': %s",
                     argv[1], strerror(errno));
                 exit(1);
             }
         } else if (!strcasecmp(argv[0],"loglevel") && argc == 2) {
-            if (!strcasecmp(argv[1],"debug")) server.verbosity = DISCNT_DEBUG;
-            else if (!strcasecmp(argv[1],"verbose")) server.verbosity = DISCNT_VERBOSE;
-            else if (!strcasecmp(argv[1],"notice")) server.verbosity = DISCNT_NOTICE;
-            else if (!strcasecmp(argv[1],"warning")) server.verbosity = DISCNT_WARNING;
+            if (!strcasecmp(argv[1],"debug")) server.verbosity = LL_DEBUG;
+            else if (!strcasecmp(argv[1],"verbose")) server.verbosity = LL_VERBOSE;
+            else if (!strcasecmp(argv[1],"notice")) server.verbosity = LL_NOTICE;
+            else if (!strcasecmp(argv[1],"warning")) server.verbosity = LL_WARNING;
             else {
                 err = "Invalid log level. Must be one of debug, notice, warning";
                 goto loaderr;
@@ -212,6 +236,14 @@ void loadServerConfigFromString(char *config) {
             if (server.maxmemory <= 0) {
                 err = "You need to specify a memory limit greater than zero";
             }
+        } else if (!strcasecmp(argv[0],"ddbcompression") && argc == 2) {
+            if ((server.ddb_compression = yesnotoi(argv[1])) == -1) {
+                err = "argument must be 'yes' or 'no'"; goto loaderr;
+            }
+        } else if (!strcasecmp(argv[0],"ddbchecksum") && argc == 2) {
+            if ((server.ddb_checksum = yesnotoi(argv[1])) == -1) {
+                err = "argument must be 'yes' or 'no'"; goto loaderr;
+            }
         } else if (!strcasecmp(argv[0],"activerehashing") && argc == 2) {
             if ((server.activerehashing = yesnotoi(argv[1])) == -1) {
                 err = "argument must be 'yes' or 'no'"; goto loaderr;
@@ -233,6 +265,13 @@ void loadServerConfigFromString(char *config) {
         } else if (!strcasecmp(argv[0],"pidfile") && argc == 2) {
             zfree(server.pidfile);
             server.pidfile = zstrdup(argv[1]);
+        } else if (!strcasecmp(argv[0],"dbfilename") && argc == 2) {
+            if (!pathIsBaseName(argv[1])) {
+                err = "dbfilename can't be a path, just a filename";
+                goto loaderr;
+            }
+            zfree(server.ddb_filename);
+            server.ddb_filename = zstrdup(argv[1]);
         } else if (!strcasecmp(argv[0],"rename-command") && argc == 3) {
             struct serverCommand *cmd = lookupCommand(argv[1]);
             int retval;
@@ -330,7 +369,7 @@ void loadServerConfig(char *filename, char *options) {
             fp = stdin;
         } else {
             if ((fp = fopen(filename,"r")) == NULL) {
-                serverLog(DISCNT_WARNING,
+                serverLog(LL_WARNING,
                     "Fatal error, can't open config file '%s'", filename);
                 exit(1);
             }
@@ -360,7 +399,14 @@ void configSetCommand(client *c) {
     serverAssertWithInfo(c,c->argv[3],sdsEncodedObject(c->argv[3]));
     o = c->argv[3];
 
-    if (!strcasecmp(c->argv[2]->ptr,"requirepass")) {
+    if (!strcasecmp(c->argv[2]->ptr,"dbfilename")) {
+        if (!pathIsBaseName(o->ptr)) {
+            addReplyError(c, "dbfilename can't be a path, just a filename");
+            return;
+        }
+        zfree(server.ddb_filename);
+        server.ddb_filename = zstrdup(o->ptr);
+    } else if (!strcasecmp(c->argv[2]->ptr,"requirepass")) {
         if (sdslen(o->ptr) > DISCNT_AUTHPASS_MAX_LEN) goto badfmt;
         zfree(server.requirepass);
         server.requirepass = ((char*)o->ptr)[0] ? zstrdup(o->ptr) : NULL;
@@ -368,7 +414,7 @@ void configSetCommand(client *c) {
         if (getLongLongFromObject(o,&ll) == DISCNT_ERR || ll <= 0) goto badfmt;
         server.maxmemory = ll;
         if (server.maxmemory < zmalloc_used_memory()) {
-            serverLog(DISCNT_WARNING,"WARNING: the new maxmemory value set via CONFIG SET is smaller than the current memory usage. The new limit may not be enforced, or the Resident Set Size of the process may not be reduced anyway. Moreover this may result in the inability to accept new jobs and jobs ACKs evictions.");
+            serverLog(LL_WARNING,"WARNING: the new maxmemory value set via CONFIG SET is smaller than the current memory usage. The new limit may not be enforced, or the Resident Set Size of the process may not be reduced anyway. Moreover this may result in the inability to accept new jobs and jobs ACKs evictions.");
         }
     } else if (!strcasecmp(c->argv[2]->ptr,"maxclients")) {
         int orig_value = server.maxclients;
@@ -396,6 +442,40 @@ void configSetCommand(client *c) {
                 }
             }
         }
+    } else if (!strcasecmp(c->argv[2]->ptr,"save")) {
+        int vlen, j;
+        sds *v = sdssplitlen(o->ptr,sdslen(o->ptr)," ",1,&vlen);
+
+        /* Perform sanity check before setting the new config:
+         * - Even number of args
+         * - Seconds >= 1, changes >= 0 */
+        if (vlen & 1) {
+            sdsfreesplitres(v,vlen);
+            goto badfmt;
+        }
+        for (j = 0; j < vlen; j++) {
+            char *eptr;
+            long val;
+
+            val = strtoll(v[j], &eptr, 10);
+            if (eptr[0] != '\0' ||
+                ((j & 1) == 0 && val < 1) ||
+                ((j & 1) == 1 && val < 0)) {
+                sdsfreesplitres(v,vlen);
+                goto badfmt;
+            }
+        }
+        /* Finally set the new config */
+        resetServerSaveParams();
+        for (j = 0; j < vlen; j += 2) {
+            time_t seconds;
+            int changes;
+
+            seconds = strtoll(v[j],NULL,10);
+            changes = strtoll(v[j+1],NULL,10);
+            appendServerSaveParams(seconds, changes);
+        }
+        sdsfreesplitres(v,vlen);
     } else if (!strcasecmp(c->argv[2]->ptr,"precision")) {
         if (getLongDoubleFromObject(o,&ld) == DISCNT_ERR || ll < 1) goto badfmt;
 
@@ -423,18 +503,22 @@ void configSetCommand(client *c) {
             addReplyErrorFormat(c,"Changing directory: %s", strerror(errno));
             return;
         }
+    } else if (!strcasecmp(c->argv[2]->ptr,"ddbcompression")) {
+        int yn = yesnotoi(o->ptr);
+        if (yn == -1) goto badfmt;
+        server.ddb_compression = yn;
     } else if (!strcasecmp(c->argv[2]->ptr,"latency-monitor-threshold")) {
         if (getLongLongFromObject(o,&ll) == DISCNT_ERR || ll < 0) goto badfmt;
         server.latency_monitor_threshold = ll;
     } else if (!strcasecmp(c->argv[2]->ptr,"loglevel")) {
         if (!strcasecmp(o->ptr,"warning")) {
-            server.verbosity = DISCNT_WARNING;
+            server.verbosity = LL_WARNING;
         } else if (!strcasecmp(o->ptr,"notice")) {
-            server.verbosity = DISCNT_NOTICE;
+            server.verbosity = LL_NOTICE;
         } else if (!strcasecmp(o->ptr,"verbose")) {
-            server.verbosity = DISCNT_VERBOSE;
+            server.verbosity = LL_VERBOSE;
         } else if (!strcasecmp(o->ptr,"debug")) {
-            server.verbosity = DISCNT_DEBUG;
+            server.verbosity = LL_DEBUG;
         } else {
             goto badfmt;
         }
@@ -555,6 +639,7 @@ void configGetCommand(client *c) {
     serverAssertWithInfo(c,o,sdsEncodedObject(o));
 
     /* String values */
+    config_get_string_field("dbfilename",server.ddb_filename);
     config_get_string_field("requirepass",server.requirepass);
     config_get_string_field("unixsocket",server.unixsocket);
     config_get_string_field("logfile",server.logfile);
@@ -578,10 +663,28 @@ void configGetCommand(client *c) {
 
     /* Bool (yes/no) values */
     config_get_bool_field("daemonize", server.daemonize);
+    config_get_bool_field("ddbcompression", server.ddb_compression);
+    config_get_bool_field("ddbchecksum", server.ddb_checksum);
     config_get_bool_field("activerehashing", server.activerehashing);
 
     /* Everything we can't handle with macros follows. */
 
+    if (stringmatch(pattern,"save",0)) {
+        sds buf = sdsempty();
+        int j;
+
+        for (j = 0; j < server.saveparamslen; j++) {
+            buf = sdscatprintf(buf,"%jd %d",
+                    (intmax_t)server.saveparams[j].seconds,
+                    server.saveparams[j].changes);
+            if (j != server.saveparamslen-1)
+                buf = sdscatlen(buf," ",1);
+        }
+        addReplyBulkCString(c,"save");
+        addReplyBulkCString(c,buf);
+        sdsfree(buf);
+        matches++;
+    }
     if (stringmatch(pattern,"dir",0)) {
         char buf[1024];
 
@@ -596,10 +699,10 @@ void configGetCommand(client *c) {
         char *s;
 
         switch(server.verbosity) {
-        case DISCNT_WARNING: s = "warning"; break;
-        case DISCNT_VERBOSE: s = "verbose"; break;
-        case DISCNT_NOTICE: s = "notice"; break;
-        case DISCNT_DEBUG: s = "debug"; break;
+        case LL_WARNING: s = "warning"; break;
+        case LL_VERBOSE: s = "verbose"; break;
+        case LL_NOTICE: s = "notice"; break;
+        case LL_DEBUG: s = "debug"; break;
         default: s = "unknown"; break; /* too harmless to panic */
         }
         addReplyBulkCString(c,"loglevel");
@@ -951,6 +1054,23 @@ void rewriteConfigSyslogfacilityOption(struct rewriteConfigState *state) {
     rewriteConfigRewriteLine(state,option,line,force);
 }
 
+/* Rewrite the save option. */
+void rewriteConfigSaveOption(struct rewriteConfigState *state) {
+    int j;
+    sds line;
+
+    /* Note that if there are no save parameters at all, all the current
+     * config line with "save" will be detected as orphaned and deleted,
+     * resulting into no DDB persistence as expected. */
+    for (j = 0; j < server.saveparamslen; j++) {
+        line = sdscatprintf(sdsempty(),"save %ld %d",
+            (long) server.saveparams[j].seconds, server.saveparams[j].changes);
+        rewriteConfigRewriteLine(state,"save",line,1);
+    }
+    /* Mark "save" as processed in case server.saveparamslen is zero. */
+    rewriteConfigMarkAsProcessed(state,"save");
+}
+
 /* Rewrite the dir option, always using absolute paths.*/
 void rewriteConfigDirOption(struct rewriteConfigState *state) {
     char cwd[1024];
@@ -961,6 +1081,7 @@ void rewriteConfigDirOption(struct rewriteConfigState *state) {
     }
     rewriteConfigStringOption(state,"dir",cwd,NULL);
 }
+
 
 /* Rewrite the client-output-buffer-limit option. */
 void rewriteConfigClientoutputbufferlimitOption(struct rewriteConfigState *state) {
@@ -1058,7 +1179,7 @@ void rewriteConfigRemoveOrphaned(struct rewriteConfigState *state) {
         /* Don't blank lines about options the rewrite process
          * don't understand. */
         if (dictFind(state->rewritten,option) == NULL) {
-            serverLog(DISCNT_DEBUG,"Not rewritten option: %s", option);
+            serverLog(LL_DEBUG,"Not rewritten option: %s", option);
             continue;
         }
 
@@ -1160,15 +1281,20 @@ int rewriteConfig(char *path) {
     rewriteConfigNumericalOption(state,"timeout",server.maxidletime,DISCNT_MAXIDLETIME);
     rewriteConfigNumericalOption(state,"tcp-keepalive",server.tcpkeepalive,DISCNT_DEFAULT_TCP_KEEPALIVE);
     rewriteConfigEnumOption(state,"loglevel",server.verbosity,
-        "debug", DISCNT_DEBUG,
-        "verbose", DISCNT_VERBOSE,
-        "notice", DISCNT_NOTICE,
-        "warning", DISCNT_WARNING,
+        "debug", LL_DEBUG,
+        "verbose", LL_VERBOSE,
+        "notice", LL_NOTICE,
+        "warning", LL_WARNING,
         NULL, DISCNT_DEFAULT_VERBOSITY);
     rewriteConfigStringOption(state,"logfile",server.logfile,DISCNT_DEFAULT_LOGFILE);
     rewriteConfigYesNoOption(state,"syslog-enabled",server.syslog_enabled,DISCNT_DEFAULT_SYSLOG_ENABLED);
     rewriteConfigStringOption(state,"syslog-ident",server.syslog_ident,DISCNT_DEFAULT_SYSLOG_IDENT);
     rewriteConfigSyslogfacilityOption(state);
+    rewriteConfigSaveOption(state);
+    rewriteConfigYesNoOption(state,"stop-writes-on-bgsave-error",server.stop_writes_on_bgsave_err,DISCNT_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR);
+    rewriteConfigYesNoOption(state,"ddbcompression",server.ddb_compression,DISCNT_DEFAULT_DDB_COMPRESSION);
+    rewriteConfigYesNoOption(state,"ddbchecksum",server.ddb_checksum,DISCNT_DEFAULT_DDB_CHECKSUM);
+    rewriteConfigStringOption(state,"dbfilename",server.ddb_filename,DISCNT_DEFAULT_DDB_FILENAME);
     rewriteConfigDirOption(state);
     rewriteConfigStringOption(state,"requirepass",server.requirepass,NULL);
     rewriteConfigNumericalOption(state,"maxclients",server.maxclients,DISCNT_MAX_CLIENTS);
@@ -1220,10 +1346,10 @@ void configCommand(client *c) {
             return;
         }
         if (rewriteConfig(server.configfile) == -1) {
-            serverLog(DISCNT_WARNING,"CONFIG REWRITE failed: %s", strerror(errno));
+            serverLog(LL_WARNING,"CONFIG REWRITE failed: %s", strerror(errno));
             addReplyErrorFormat(c,"Rewriting config file: %s", strerror(errno));
         } else {
-            serverLog(DISCNT_WARNING,"CONFIG REWRITE executed with success.");
+            serverLog(LL_WARNING,"CONFIG REWRITE executed with success.");
             addReply(c,shared.ok);
         }
     } else {
