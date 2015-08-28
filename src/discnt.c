@@ -102,8 +102,6 @@ struct discntServer server; /* server global state */
  * M: Do not automatically propagate the command on MONITOR.
  * F: Fast command: O(1) or O(log(N)) command that should never delay
  *    its execution as long as the kernel scheduler is giving us time.
- *    Note that commands that may trigger a DEL as a side effect (like SET)
- *    are not fast commands.
  */
 struct serverCommand serverCommandTable[] = {
     /* Server commands. */
@@ -128,6 +126,7 @@ struct serverCommand serverCommandTable[] = {
     {"incr",incrCommand,3,"wmF",0,NULL,0,0,0,0,0},
     {"get",getCommand,2,"rF",0,NULL,0,0,0,0,0},
     {"counters",countersCommand,2,"r",0,NULL,0,0,0,0,0},
+    {"precision",precisionCommand,-2,"wmF",0,NULL,0,0,0,0,0},
 };
 
 /*============================ Utility functions ============================ */

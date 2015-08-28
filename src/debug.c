@@ -122,6 +122,7 @@ void computeDatasetDigest(unsigned char *final) {
 
         mixDigest(digest,cntr->name,sdslen(cntr->name));
         mixDigest(digest,&cntr->value,sizeof(cntr->value));
+        mixDigest(digest,&cntr->precision,sizeof(cntr->precision));
 
         /* We can finally xor the key-val digest to the final digest */
         xorDigest(final,digest,20);
@@ -198,7 +199,7 @@ void debugCommand(client *c) {
             return;
         }
 
-        addReplyMultiBulkLen(c,5);
+        addReplyMultiBulkLen(c,7);
 
         addReplyMultiBulkLen(c,listLength(cntr->shards));
 
@@ -229,6 +230,9 @@ void debugCommand(client *c) {
         for (i = server.history_size - 1; i > server.history_index; i--) {
             addReplyLongDouble(c, cntr->history[i]);
         }
+
+        addReplyLongLong(c, cntr->revision);
+        addReplyLongDouble(c, cntr->precision);
 
         addReplyLongLong(c, cntr->hits);
         addReplyLongLong(c, cntr->misses);

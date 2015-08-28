@@ -165,6 +165,14 @@ int ddbLoadLongDouble(rio *ddb, long double *val) {
     }
 }
 
+int ddbLoadDouble(rio *ddb, double *val) {
+    int r;
+    long double d;
+    if ((r = ddbLoadLongDouble(ddb,&d)) == -1) return -1;
+    *val = d;
+    return 0;
+}
+
 int ddbSaveCounter(rio *ddb, counter* cntr) {
     int n;
     size_t nwritten = 0;
@@ -178,6 +186,9 @@ int ddbSaveCounter(rio *ddb, counter* cntr) {
     nwritten += n;
 
     if ((n = ddbSaveLen(ddb,cntr->revision)) == -1) return -1;
+    nwritten += n;
+
+    if ((n = ddbSaveLongDouble(ddb,cntr->precision)) == -1) return -1;
     nwritten += n;
 
     if ((n = ddbSaveLen(ddb,cntr->hits)) == -1) return -1;
@@ -200,7 +211,7 @@ int ddbSaveCounter(rio *ddb, counter* cntr) {
 
         if ((n = ddbSaveLongDouble(ddb,shrd->value)) == -1) return -1;
         nwritten += n;
-        
+
         if ((n = ddbSaveLongLong(ddb,shrd->predict_time)) == -1) return -1;
         nwritten += n;
 
@@ -385,6 +396,8 @@ int ddbLoadCounter(rio *ddb) {
     cntr = counterCreate(name);
 
     if ((cntr->revision = ddbLoadLen(ddb)) == DDB_LENERR) goto rerr;
+
+    if (ddbLoadDouble(ddb,&cntr->precision) == -1) goto rerr;
 
     if ((cntr->hits = ddbLoadLen(ddb)) == DDB_LENERR) goto rerr;
 

@@ -60,6 +60,7 @@ typedef struct counter {
     uint32_t revision;
     dict     *acks;
     mstime_t updated;
+    double precision;  /* Desired prediction precision. */
 
     uint32_t hits;
     uint32_t misses;

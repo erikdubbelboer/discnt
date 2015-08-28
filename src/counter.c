@@ -109,9 +109,10 @@ counter *counterLookup(sds name) {
 counter *counterCreate(sds name) {
     counter *cntr = zcalloc(sizeof(counter) + (sizeof(long double) * server.history_size));
 
-    cntr->name    = name;
-    cntr->shards  = listCreate();
-    cntr->history = (long double*)(cntr + 1);
+    cntr->name      = name;
+    cntr->shards    = listCreate();
+    cntr->history   = (long double*)(cntr + 1);
+    cntr->precision = server.precision;
 
     return cntr;
 }
@@ -147,9 +148,7 @@ void incrCommand(client *c) {
     }
 
     cntr->value += increment;
-
     server.dirty++;
-
     addReplyLongDouble(c, cntr->value);
 }
 
@@ -163,6 +162,34 @@ void getCommand(client *c) {
     }
 
     addReplyLongDouble(c, value);
+}
+
+void precisionCommand(client *c) {
+    counter *cntr;
+    double precision;
+
+    cntr = counterLookup(c->argv[1]->ptr);
+    if (cntr == NULL && c->argc == 2) {
+        addReplyDouble(c, server.precision);
+        return;
+    }
+
+    if (c->argc == 2) {
+        addReplyDouble(c, cntr->precision);
+        return;
+    }
+
+    if (getDoubleFromObjectOrReply(c, c->argv[2], &precision, NULL) != DISCNT_OK)
+        return;
+
+    if (cntr == NULL) {
+        cntr = counterCreate(sdsdup(c->argv[1]->ptr));
+        counterAdd(cntr);
+    }
+
+    cntr->precision = precision;
+    server.dirty++;
+    addReplyDouble(c, cntr->precision);
 }
 
 void countersCommand(client *c) {
@@ -300,7 +327,7 @@ void countersHistoryCron(void) {
             elapsed = (now - cntr->myshard->predict_time);
             rvalue = cntr->myshard->predict_value + (elapsed * cntr->myshard->predict_change);
 
-            if (fabs((double)(rvalue - cntr->myshard->value)) <= server.precision) {
+            if (fabs((double)(rvalue - cntr->myshard->value)) <= cntr->precision) {
                 /* It's still up to date, check if we need to resend our last prediction. */
                 counterMaybeResend(cntr);
 
