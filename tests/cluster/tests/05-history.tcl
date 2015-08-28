@@ -1,8 +1,8 @@
 source "../tests/includes/init-tests.tcl"    
 
 test "Big counters should be accurate after a full history" {
-    D 1 incr big 10
-    D 2 incr big 20
+    D 1 incrby big 10
+    D 2 incrby big 20
 
     # Wait for a full history + one sync + 1 second tolerance.
     after 6000
@@ -17,7 +17,7 @@ test "Big counters should be accurate after a full history" {
 }
 
 test "Small counters should be accurate after a while" {
-    D 1 incr small 0.8
+    D 1 incrby small 0.8
 
     # It takes 1/(0.8/4)= 5 seconds before the counter's prediction
     # will be 1 off from the actual value.

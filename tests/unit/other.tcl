@@ -10,7 +10,7 @@ start_server {tags {"other"}} {
         waitForBgsave r
         r debug flushall
         r save
-        r incr x 10
+        r incrby x 10
         r bgsave
         waitForBgsave r
         r debug reload

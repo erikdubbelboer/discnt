@@ -11,7 +11,7 @@ test "Predictions will not ack" {
         fail "Killed nodes not flagged with FAIL flag after some time"
     }
 
-    set v [D 1 incr test 1.0]
+    set v [D 1 incr test]
 }
 
 test "Restarting node" {

@@ -1,7 +1,7 @@
 source "../tests/includes/init-tests.tcl"    
 
 test "INCR should propagate" {
-    D 0 incr test 2.0
+    D 0 incrby test 2.0
 
     # Wait for one sync round.
     after 1100
@@ -11,8 +11,8 @@ test "INCR should propagate" {
     assert {$v >= 2}
 }
 
-test "Negative INCR should propagate" {
-    D 0 incr test -4.0
+test "DECR should propagate" {
+    D 0 decrby test 4.0
 
     # Wait for one sync round.
     after 1100

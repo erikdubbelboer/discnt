@@ -1,7 +1,7 @@
 source "../tests/includes/init-tests.tcl"
 
 test "Killing a node" {
-    set v [D 2 incr test 1.0]
+    set v [D 2 incr test]
 
     after 1100
 

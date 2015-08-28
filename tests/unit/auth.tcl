@@ -12,7 +12,7 @@ start_server {tags {"auth"} overrides {requirepass foobar}} {
     } {ERR*invalid password}
 
     test {Arbitrary command gives an error when AUTH is required} {
-        catch {r incr foo 1} err
+        catch {r incr foo} err
         set _ $err
     } {NOAUTH*}
 
@@ -21,7 +21,7 @@ start_server {tags {"auth"} overrides {requirepass foobar}} {
     } {OK}
 
     test {Once AUTH succeeded we can actually send commands to the server} {
-        r incr foo 100
-        r incr foo 1
+        r incrby foo 100
+        r incr foo
     } {101}
 }

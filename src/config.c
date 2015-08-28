@@ -333,6 +333,11 @@ void loadServerConfigFromString(char *config) {
             server.client_obuf_limits[class].hard_limit_bytes = hard;
             server.client_obuf_limits[class].soft_limit_bytes = soft;
             server.client_obuf_limits[class].soft_limit_seconds = soft_seconds;
+        } else if (!strcasecmp(argv[0],"stop-writes-on-bgsave-error") &&
+                   argc == 2) {
+            if ((server.stop_writes_on_bgsave_err = yesnotoi(argv[1])) == -1) {
+                err = "argument must be 'yes' or 'no'"; goto loaderr;
+            }
         } else {
             err = "Bad directive or wrong number of arguments"; goto loaderr;
         }
@@ -662,6 +667,8 @@ void configGetCommand(client *c) {
     config_get_numerical_field("cluster-node-timeout",server.cluster_node_timeout);
 
     /* Bool (yes/no) values */
+    config_get_bool_field("stop-writes-on-bgsave-error",
+            server.stop_writes_on_bgsave_err);
     config_get_bool_field("daemonize", server.daemonize);
     config_get_bool_field("ddbcompression", server.ddb_compression);
     config_get_bool_field("ddbchecksum", server.ddb_checksum);

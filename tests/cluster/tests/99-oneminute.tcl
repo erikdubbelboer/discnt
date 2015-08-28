@@ -4,12 +4,12 @@ test "Increment for 1 minute" {
     # 10 seconds
     for {set i 0} {$i < 100} {incr i} {
         after 100
-        D 0 incr test0 0.01
-        D 1 incr test1 0.1
-        D 2 incr test2 1.0
-        D 3 incr test3 0.8
-        D 4 incr test3 1.0
-        D 5 incr test3 -1.2
+        D 0 incrby test0 0.01
+        D 1 incrby test1 0.1
+        D 2 incrby test2 1.0
+        D 3 incrby test3 0.8
+        D 4 incrby test3 1.0
+        D 5 incrby test3 -1.2
     }
 
     kill_instance discnt 6
@@ -17,12 +17,12 @@ test "Increment for 1 minute" {
     # 20 seconds
     for {set i 0} {$i < 200} {incr i} {
         after 100
-        D 0 incr test0 0.01
-        D 1 incr test1 0.1
-        D 2 incr test2 1.0
-        D 3 incr test3 0.8
-        D 4 incr test3 1.0
-        D 5 incr test3 -1.2
+        D 0 incrby test0 0.01
+        D 1 incrby test1 0.1
+        D 2 incrby test2 1.0
+        D 3 incrby test3 0.8
+        D 4 incrby test3 1.0
+        D 5 incrby test3 -1.2
     }
 
     restart_instance discnt 6
@@ -30,12 +30,12 @@ test "Increment for 1 minute" {
     # 30 seconds
     for {set i 0} {$i < 300} {incr i} {
         after 100
-        D 0 incr test0 0.01
-        D 1 incr test1 0.1
-        D 2 incr test2 1.0
-        D 3 incr test3 0.8
-        D 4 incr test3 1.0
-        D 5 incr test3 -1.2
+        D 0 incrby test0 0.01
+        D 1 incrby test1 0.1
+        D 2 incrby test2 1.0
+        D 3 incrby test3 0.8
+        D 4 incrby test3 1.0
+        D 5 incrby test3 -1.2
     }
 }
 

@@ -798,8 +798,11 @@ void lastsaveCommand(client *c);
 void saveCommand(client *c);
 void bgsaveCommand(client *c);
 void incrCommand(client *c);
+void incrbyCommand(client *c);
+void decrCommand(client *c);
+void decrbyCommand(client *c);
 void getCommand(client *c);
-void countersCommand(client *c);
+void keysCommand(client *c);
 void precisionCommand(client *c);
 
 #if defined(__GNUC__)

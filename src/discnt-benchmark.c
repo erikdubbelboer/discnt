@@ -557,10 +557,10 @@ usage:
 " -a <password>      Password for Discnt Auth\n"
 " -c <clients>       Number of parallel connections (default 50)\n"
 " -n <requests>      Total number of requests (default 100000)\n"
-" -d <size>          Data size of SET/GET value in bytes (default 2)\n"
+" -d <size>          Data size of GET value in bytes (default 2)\n"
 " -dbnum <db>        SELECT the specified db number (default 0)\n"
 " -k <boolean>       1=keep alive 0=reconnect (default 1)\n"
-" -r <keyspacelen>   Use random keys for SET/GET/INCR, random values for SADD\n"
+" -r <keyspacelen>   Use random keys for GET/INCR, random values for SADD\n"
 "  Using this option the benchmark will expand the string __rand_int__\n"
 "  inside an argument with a 12 digits number in the specified range\n"
 "  from 0 to keyspacelen-1. The substitution changes every time a command\n"
@@ -578,12 +578,12 @@ usage:
 "   $ discnt-benchmark\n\n"
 " Use 20 parallel clients, for a total of 100k requests, against 192.168.1.1:\n"
 "   $ discnt-benchmark -h 192.168.1.1 -p 5262 -n 100000 -c 20\n\n"
-" Fill 127.0.0.1:5262 with about 1 million keys only using the SET test:\n"
-"   $ discnt-benchmark -t set -n 1000000 -r 100000000\n\n"
+" Fill 127.0.0.1:5262 with about 1 million keys only using the INCR test:\n"
+"   $ discnt-benchmark -t incr -n 1000000 -r 100000000\n\n"
 " Benchmark 127.0.0.1:5262 for a few commands producing CSV output:\n"
-"   $ discnt-benchmark -t ping,set,get -n 100000 --csv\n\n"
-" Fill a list with 10000 random elements:\n"
-"   $ discnt-benchmark -r 10000 -n 10000 lpush mylist __rand_int__\n\n"
+"   $ discnt-benchmark -t ping,incr,get -n 100000 --csv\n\n"
+" Increment 10000 random elements:\n"
+"   $ discnt-benchmark -r 10000 -n 10000 incr __rand_int__ 1.0\n\n"
 " On user specified command lines __rand_int__ is replaced with a random integer\n"
 " with a range of values selected by the -r option.\n"
     );
@@ -710,12 +710,6 @@ int main(int argc, const char **argv) {
             free(cmd);
         }
 
-        if (test_is_selected("set")) {
-            len = redisFormatCommand(&cmd,"SET key:__rand_int__ %s",data);
-            benchmark("SET",cmd,len);
-            free(cmd);
-        }
-
         if (test_is_selected("get")) {
             len = redisFormatCommand(&cmd,"GET key:__rand_int__");
             benchmark("GET",cmd,len);
@@ -725,90 +719,6 @@ int main(int argc, const char **argv) {
         if (test_is_selected("incr")) {
             len = redisFormatCommand(&cmd,"INCR counter:__rand_int__");
             benchmark("INCR",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("lpush")) {
-            len = redisFormatCommand(&cmd,"LPUSH mylist %s",data);
-            benchmark("LPUSH",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("rpush")) {
-            len = redisFormatCommand(&cmd,"RPUSH mylist %s",data);
-            benchmark("RPUSH",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("lpop")) {
-            len = redisFormatCommand(&cmd,"LPOP mylist");
-            benchmark("LPOP",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("rpop")) {
-            len = redisFormatCommand(&cmd,"RPOP mylist");
-            benchmark("RPOP",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("sadd")) {
-            len = redisFormatCommand(&cmd,
-                "SADD myset element:__rand_int__");
-            benchmark("SADD",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("spop")) {
-            len = redisFormatCommand(&cmd,"SPOP myset");
-            benchmark("SPOP",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("lrange") ||
-            test_is_selected("lrange_100") ||
-            test_is_selected("lrange_300") ||
-            test_is_selected("lrange_500") ||
-            test_is_selected("lrange_600"))
-        {
-            len = redisFormatCommand(&cmd,"LPUSH mylist %s",data);
-            benchmark("LPUSH (needed to benchmark LRANGE)",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("lrange") || test_is_selected("lrange_100")) {
-            len = redisFormatCommand(&cmd,"LRANGE mylist 0 99");
-            benchmark("LRANGE_100 (first 100 elements)",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("lrange") || test_is_selected("lrange_300")) {
-            len = redisFormatCommand(&cmd,"LRANGE mylist 0 299");
-            benchmark("LRANGE_300 (first 300 elements)",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("lrange") || test_is_selected("lrange_500")) {
-            len = redisFormatCommand(&cmd,"LRANGE mylist 0 449");
-            benchmark("LRANGE_500 (first 450 elements)",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("lrange") || test_is_selected("lrange_600")) {
-            len = redisFormatCommand(&cmd,"LRANGE mylist 0 599");
-            benchmark("LRANGE_600 (first 600 elements)",cmd,len);
-            free(cmd);
-        }
-
-        if (test_is_selected("mset")) {
-            const char *argv[21];
-            argv[0] = "MSET";
-            for (i = 1; i < 21; i += 2) {
-                argv[i] = "key:__rand_int__";
-                argv[i+1] = data;
-            }
-            len = redisFormatCommandArgv(&cmd,21,argv,NULL);
-            benchmark("MSET (10 keys)",cmd,len);
             free(cmd);
         }
 

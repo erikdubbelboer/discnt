@@ -123,9 +123,12 @@ struct serverCommand serverCommandTable[] = {
     {"bgsave",bgsaveCommand,1,"ar",0,NULL,0,0,0,0,0},
 
     /* Counter commands. */
-    {"incr",incrCommand,3,"wmF",0,NULL,0,0,0,0,0},
+    {"incr",incrCommand,2,"wmF",0,NULL,0,0,0,0,0},
+    {"incrby",incrbyCommand,3,"wmF",0,NULL,0,0,0,0,0},
+    {"decr",decrCommand,3,"wmF",0,NULL,0,0,0,0,0},
+    {"decrby",decrbyCommand,3,"wmF",0,NULL,0,0,0,0,0},
     {"get",getCommand,2,"rF",0,NULL,0,0,0,0,0},
-    {"counters",countersCommand,2,"r",0,NULL,0,0,0,0,0},
+    {"keys",keysCommand,2,"r",0,NULL,0,0,0,0,0},
     {"precision",precisionCommand,-2,"wmF",0,NULL,0,0,0,0,0},
 };
 

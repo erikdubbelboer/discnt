@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Erik Dubbelboer <erik at dubbelboer dot com>
+ * Copyright (c) 2015, Erik Dubbelboer <erik at dubbelboer dot com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -122,12 +122,8 @@ void counterAdd(counter *cntr) {
     serverAssert(retval == 0);
 }
 
-void incrCommand(client *c) {
-    long double increment;
+void genericIncrCommand(client *c, long double increment) {
     counter *cntr;
-
-    if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != DISCNT_OK)
-        return;
 
     cntr = counterLookup(c->argv[1]->ptr);
     if (cntr == NULL) {
@@ -150,6 +146,28 @@ void incrCommand(client *c) {
     cntr->value += increment;
     server.dirty++;
     addReplyLongDouble(c, cntr->value);
+}
+
+void incrCommand(client *c) {
+    genericIncrCommand(c, 1.0);
+}
+
+void incrbyCommand(client *c) {
+    long double increment;
+    if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != DISCNT_OK)
+        return;
+    genericIncrCommand(c, increment);
+}
+
+void decrCommand(client *c) {
+    genericIncrCommand(c, -1.0);
+}
+
+void decrbyCommand(client *c) {
+    long double increment;
+    if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != DISCNT_OK)
+        return;
+    genericIncrCommand(c, -increment);
 }
 
 void getCommand(client *c) {
@@ -192,7 +210,7 @@ void precisionCommand(client *c) {
     addReplyDouble(c, cntr->precision);
 }
 
-void countersCommand(client *c) {
+void keysCommand(client *c) {
     dictIterator *di;
     dictEntry *de;
     sds pattern = c->argv[1]->ptr;
@@ -356,8 +374,6 @@ void countersHistoryCron(void) {
         counterUpdateHistory(cntr);
 
         cntr->updated = mstime();
-
-        server.dirty++;
     }
     dictReleaseIterator(it);
 }

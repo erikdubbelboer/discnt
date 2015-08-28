@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Erik Dubbelboer <erik at dubbelboer dot com>
+ * Copyright (c) 2015, Erik Dubbelboer <erik at dubbelboer dot com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without

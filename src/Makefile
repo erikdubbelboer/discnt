@@ -1,5 +1,5 @@
 # Discnt Makefile
-# Copyright (C) 2009-2014 Salvatore Sanfilippo <antirez at gmail dot com>
+# Copyright (C) 2009-2015 Salvatore Sanfilippo <antirez at gmail dot com>
 # This file is released under the BSD license, see the COPYING file
 #
 # The Makefile composes the final FINAL_CFLAGS and FINAL_LDFLAGS using

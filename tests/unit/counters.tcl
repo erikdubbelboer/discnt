@@ -1,20 +1,20 @@
 start_server {tags {"counters"}} {
     test {INCR a counter} {
-        r incr test 1
-        r incr test 1
-    } {2}
+        r incr test
+        r incrby test 2
+    } {3}
 
     test {GET a counter} {
         r get test
-    } {2}
+    } {3}
 
     test {GET on non existent counter should return 0} {
         r get doesnotexist
     } {0}
 
-    test {COUNTERS should return all counters} {
-        r incr test2 1
-        lsort [r counters *]
+    test {KEYS should return all counters} {
+        r incr test2
+        lsort [r keys *]
     } {test test2}
 
     test {PRECISION on none existing counter} {
