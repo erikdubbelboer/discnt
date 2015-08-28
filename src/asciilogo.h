@@ -28,10 +28,9 @@
  */
 
 char *ascii_logo =
-"                                        Discnt %s (%s/%d) %s bit\n"
-"          _ -                                                        \n"
-"        .                               Port: %d\n"
-"        .    o    .                     PID: %ld\n"
-"                 .                                                   \n"
-"               -                              http://discnt.io       \n"
-"                                                                     \n\n";
+"           _                           Discnt %s (%s/%d) %s bit\n"
+"        __|_\\__                                                     \n"
+"      =O__.-.__)                        Port: %d\n"
+"          /_/                           PID: %ld\n"
+"                                                                  \n\n";
+
