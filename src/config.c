@@ -399,7 +399,7 @@ void loadServerConfig(char *filename, char *options) {
 void configSetCommand(client *c) {
     robj *o;
     long long ll = 0;
-    long double ld = 0;
+    double d = 0;
     serverAssertWithInfo(c,c->argv[2],sdsEncodedObject(c->argv[2]));
     serverAssertWithInfo(c,c->argv[3],sdsEncodedObject(c->argv[3]));
     o = c->argv[3];
@@ -482,14 +482,9 @@ void configSetCommand(client *c) {
         }
         sdsfreesplitres(v,vlen);
     } else if (!strcasecmp(c->argv[2]->ptr,"precision")) {
-        if (getLongDoubleFromObject(o,&ld) == DISCNT_ERR || ll < 1) goto badfmt;
+        if (getDoubleFromObject(o,&d) == DISCNT_ERR || d <= 0) goto badfmt;
 
-        if (ld < 0) {
-            addReplyErrorFormat(c,"Invalid precision");
-            return;
-        }
-
-        server.precision = ld;
+        server.precision = d;
     } else if (!strcasecmp(c->argv[2]->ptr,"hz")) {
         if (getLongLongFromObject(o,&ll) == DISCNT_ERR || ll < 0) goto badfmt;
         server.hz = ll;

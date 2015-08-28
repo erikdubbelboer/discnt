@@ -25,4 +25,9 @@ start_server {tags {"counters"}} {
         r precision test 2.2
         set _ [expr {round([r precision test] * 10)}]
     } {22}
+
+    test {CONFIG SET precision} {
+        r config set precision 0.1
+        r config set precision 1.0
+    } {OK}
 }
