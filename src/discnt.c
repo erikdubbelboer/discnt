@@ -733,8 +733,8 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
                  DISCNT_BGSAVE_RETRY_DELAY ||
                  server.lastbgsave_status == DISCNT_OK))
             {
-                serverLog(LL_NOTICE,"%d changes in %d seconds. Saving...",
-                    sp->changes, (int)sp->seconds);
+                serverLog(LL_NOTICE,"%lld changes in %d seconds. Saving...",
+                    server.dirty, (int)sp->seconds);
                 ddbSaveBackground(server.ddb_filename);
                 break;
             }

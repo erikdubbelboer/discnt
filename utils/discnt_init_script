@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# Simple Discnt init.d script conceived to work on Linux systems
+# as it does use of the /proc filesystem.
+
+DISCNTPORT=6379
+EXEC=/usr/local/bin/discnt-server
+CLIEXEC=/usr/local/bin/discnt-cli
+
+PIDFILE=/var/run/discnt_${DISCNTPORT}.pid
+CONF="/etc/discnt/${DISCNTPORT}.conf"
+
+case "$1" in
+    start)
+        if [ -f $PIDFILE ]
+        then
+                echo "$PIDFILE exists, process is already running or crashed"
+        else
+                echo "Starting Discnt server..."
+                $EXEC $CONF
+        fi
+        ;;
+    stop)
+        if [ ! -f $PIDFILE ]
+        then
+                echo "$PIDFILE does not exist, process is not running"
+        else
+                PID=$(cat $PIDFILE)
+                echo "Stopping ..."
+                $CLIEXEC -p $DISCNTPORT shutdown
+                while [ -x /proc/${PID} ]
+                do
+                    echo "Waiting for Discnt to shutdown ..."
+                    sleep 1
+                done
+                echo "Discnt stopped"
+        fi
+        ;;
+    *)
+        echo "Please use start or stop as first argument"
+        ;;
+esac
