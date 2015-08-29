@@ -34,16 +34,16 @@
  * Discnt cluster data structures, defines, exported API.
  *----------------------------------------------------------------------------*/
 
-#define DISCNT_CLUSTER_OK 0          /* Everything looks ok */
-#define DISCNT_CLUSTER_FAIL 1        /* The cluster can't work */
-#define DISCNT_CLUSTER_NAMELEN 40    /* sha1 hex length */
-#define DISCNT_CLUSTER_PORT_INCR 10000 /* Cluster port = baseport + PORT_INCR */
+#define CLUSTER_OK 0          /* Everything looks ok */
+#define CLUSTER_FAIL 1        /* The cluster can't work */
+#define CLUSTER_NAMELEN 40    /* sha1 hex length */
+#define CLUSTER_PORT_INCR 10000 /* Cluster port = baseport + PORT_INCR */
 
 /* The following defines are amount of time, sometimes expressed as
  * multiplicators of the node timeout value (when ending with MULT). */
-#define DISCNT_CLUSTER_DEFAULT_NODE_TIMEOUT 15000
-#define DISCNT_CLUSTER_FAIL_REPORT_VALIDITY_MULT 2 /* Fail report validity. */
-#define DISCNT_CLUSTER_FAIL_UNDO_TIME_MULT 2 /* Undo fail if master is back. */
+#define CLUSTER_DEFAULT_NODE_TIMEOUT 15000
+#define CLUSTER_FAIL_REPORT_VALIDITY_MULT 2 /* Fail report validity. */
+#define CLUSTER_FAIL_UNDO_TIME_MULT 2 /* Undo fail if master is back. */
 
 struct clusterNode;
 
@@ -57,21 +57,21 @@ typedef struct clusterLink {
 } clusterLink;
 
 /* Cluster node flags and macros. */
-#define DISCNT_NODE_PFAIL     (1<<0) /* Failure? Need acknowledge */
-#define DISCNT_NODE_FAIL      (1<<1) /* The node is believed to be malfunctioning */
-#define DISCNT_NODE_MYSELF    (1<<2) /* This node is myself */
-#define DISCNT_NODE_HANDSHAKE (1<<3) /* Node in handshake state. */
-#define DISCNT_NODE_NOADDR    (1<<4) /* Node address unknown */
-#define DISCNT_NODE_MEET      (1<<5) /* Send a MEET message to this node */
-#define DISCNT_NODE_DELETED   (1<<6) /* Node no longer part of the cluster */
-#define DISCNT_NODE_NULL_NAME "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
+#define CLUSTER_NODE_PFAIL     (1<<0) /* Failure? Need acknowledge */
+#define CLUSTER_NODE_FAIL      (1<<1) /* The node is believed to be malfunctioning */
+#define CLUSTER_NODE_MYSELF    (1<<2) /* This node is myself */
+#define CLUSTER_NODE_HANDSHAKE (1<<3) /* Node in handshake state. */
+#define CLUSTER_NODE_NOADDR    (1<<4) /* Node address unknown */
+#define CLUSTER_NODE_MEET      (1<<5) /* Send a MEET message to this node */
+#define CLUSTER_NODE_DELETED   (1<<6) /* Node no longer part of the cluster */
+#define CLUSTER_NODE_NULL_NAME "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
 
-#define nodeInHandshake(n) ((n)->flags & DISCNT_NODE_HANDSHAKE)
-#define nodeHasAddr(n) (!((n)->flags & DISCNT_NODE_NOADDR))
-#define nodeWithoutAddr(n) ((n)->flags & DISCNT_NODE_NOADDR)
-#define nodeTimedOut(n) ((n)->flags & DISCNT_NODE_PFAIL)
-#define nodeFailed(n) ((n)->flags & DISCNT_NODE_FAIL)
-#define nodeDeleted(n) ((n)->flags & DISCNT_NODE_DELETED)
+#define nodeInHandshake(n) ((n)->flags & CLUSTER_NODE_HANDSHAKE)
+#define nodeHasAddr(n) (!((n)->flags & CLUSTER_NODE_NOADDR))
+#define nodeWithoutAddr(n) ((n)->flags & CLUSTER_NODE_NOADDR)
+#define nodeTimedOut(n) ((n)->flags & CLUSTER_NODE_PFAIL)
+#define nodeFailed(n) ((n)->flags & CLUSTER_NODE_FAIL)
+#define nodeDeleted(n) ((n)->flags & CLUSTER_NODE_DELETED)
 
 /* This structure represent elements of node->fail_reports. */
 typedef struct clusterNodeFailReport {
@@ -80,13 +80,13 @@ typedef struct clusterNodeFailReport {
 } clusterNodeFailReport;
 
 typedef struct clusterNode {
-    char name[DISCNT_CLUSTER_NAMELEN]; /* Node name, hex string, sha1-size */
+    char name[CLUSTER_NAMELEN]; /* Node name, hex string, sha1-size */
     mstime_t ctime; /* Node object creation time. */
     int flags;      /* DISCNT_NODE_... */
     mstime_t ping_sent;      /* Unix time we sent latest ping */
     mstime_t pong_received;  /* Unix time we received the pong */
     mstime_t fail_time;      /* Unix time when FAIL flag was set */
-    char ip[DISCNT_IP_STR_LEN];  /* Latest known IP address of this node */
+    char ip[NET_IP_STR_LEN];  /* Latest known IP address of this node */
     int port;                   /* Latest known port of this node */
     clusterLink *link;          /* TCP/IP link with this node */
     list *fail_reports;         /* List of nodes signaling this as failing */
@@ -94,7 +94,7 @@ typedef struct clusterNode {
 
 typedef struct clusterState {
     clusterNode *myself;  /* This node */
-    int state;            /* DISCNT_CLUSTER_OK, DISCNT_CLUSTER_FAIL, ... */
+    int state;            /* CLUSTER_OK, CLUSTER_FAIL, ... */
     int size;             /* Num of known cluster nodes */
     dict *nodes;          /* Hash table of name -> clusterNode structures */
     dict *deleted_nodes;    /* Nodes removed from the cluster. */
@@ -132,10 +132,10 @@ typedef struct clusterState {
  * to the first node, using the getsockname() function. Then we'll use this
  * address for all the next messages. */
 typedef struct {
-    char nodename[DISCNT_CLUSTER_NAMELEN];
+    char nodename[CLUSTER_NAMELEN];
     uint32_t ping_sent;
     uint32_t pong_received;
-    char ip[DISCNT_IP_STR_LEN]; /* IP address last time it was seen */
+    char ip[NET_IP_STR_LEN]; /* IP address last time it was seen */
     uint16_t port;              /* port last time it was seen */
     uint16_t flags;             /* node->flags copy */
     uint16_t notused1;          /* Some room for future improvements. */
@@ -143,7 +143,7 @@ typedef struct {
 } clusterMsgDataGossip;
 
 typedef struct {
-    char nodename[DISCNT_CLUSTER_NAMELEN];
+    char nodename[CLUSTER_NAMELEN];
 } clusterMsgDataFail;
 
 typedef struct {
@@ -197,7 +197,7 @@ typedef struct {
     uint16_t notused0;  /* 2 bytes not used. */
     uint16_t type;      /* Message type */
     uint16_t count;     /* Only used for some kind of messages. */
-    char sender[DISCNT_CLUSTER_NAMELEN]; /* Name of the sender node */
+    char sender[CLUSTER_NAMELEN]; /* Name of the sender node */
     char notused1[32];  /* 32 bytes reserved for future usage. */
     uint16_t port;      /* Sender TCP base port */
     uint16_t flags;     /* Sender node flags */

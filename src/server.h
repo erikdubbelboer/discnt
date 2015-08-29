@@ -56,7 +56,6 @@ typedef long long mstime_t; /* millisecond time type. */
 #include "sds.h"     /* Dynamic safe strings */
 #include "dict.h"    /* Hash tables */
 #include "adlist.h"  /* Linked lists */
-#include "skiplist.h"/* Skip lists. */
 #include "zmalloc.h" /* total memory usage aware version of malloc/free */
 #include "anet.h"    /* Networking the easy way */
 #include "version.h" /* Version macro */
@@ -66,63 +65,63 @@ typedef long long mstime_t; /* millisecond time type. */
 
 
 /* Error codes */
-#define DISCNT_OK                0
-#define DISCNT_ERR               -1
+#define C_OK                0
+#define C_ERR               -1
 
 /* Static server configuration */
-#define DISCNT_DEFAULT_HZ        10      /* Time interrupt calls/sec. */
-#define DISCNT_MIN_HZ            1
-#define DISCNT_MAX_HZ            500
-#define DISCNT_TIME_ERR          500     /* Desynchronization (in ms) */
-#define DISCNT_SERVERPORT        5262    /* TCP port */
-#define DISCNT_TCP_BACKLOG       511     /* TCP listen backlog */
-#define DISCNT_MAXIDLETIME       0       /* default client timeout: infinite */
-#define DISCNT_DEFAULT_DBNUM     16
-#define DISCNT_CONFIGLINE_MAX    1024
-#define DISCNT_DBCRON_DBS_PER_CALL 16
-#define DISCNT_MAX_WRITE_PER_EVENT (1024*64)
-#define DISCNT_SHARED_INTEGERS 10000
-#define DISCNT_SHARED_BULKHDR_LEN 32
-#define DISCNT_MAX_LOGMSG_LEN    1024 /* Default maximum length of syslog messages */
-#define DISCNT_MAX_CLIENTS 10000
-#define DISCNT_PRECISION 1
-#define DISCNT_HISTORY 10
-#define DISCNT_AUTHPASS_MAX_LEN 512
-#define DISCNT_DEFAULT_SLAVE_PRIORITY 100
-#define DISCNT_REPL_TIMEOUT 60
-#define DISCNT_REPL_PING_SLAVE_PERIOD 10
-#define DISCNT_RUN_ID_SIZE 40
-#define DISCNT_EOF_MARK_SIZE 40
-#define DISCNT_DEFAULT_REPL_BACKLOG_SIZE (1024*1024)    /* 1mb */
-#define DISCNT_DEFAULT_REPL_BACKLOG_TIME_LIMIT (60*60)  /* 1 hour */
-#define DISCNT_REPL_BACKLOG_MIN_SIZE (1024*16)          /* 16k */
-#define DISCNT_BGSAVE_RETRY_DELAY 5 /* Wait a few secs before trying again. */
-#define DISCNT_DEFAULT_PID_FILE "/var/run/discnt.pid"
-#define DISCNT_DEFAULT_SYSLOG_IDENT "discnt"
-#define DISCNT_DEFAULT_CLUSTER_CONFIG_FILE "nodes.conf"
-#define DISCNT_DEFAULT_DAEMONIZE 0
-#define DISCNT_DEFAULT_UNIX_SOCKET_PERM 0
-#define DISCNT_DEFAULT_TCP_KEEPALIVE 0
-#define DISCNT_DEFAULT_LOGFILE ""
-#define DISCNT_DEFAULT_SYSLOG_ENABLED 0
-#define DISCNT_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR 1
-#define DISCNT_DEFAULT_DDB_COMPRESSION 1
-#define DISCNT_DEFAULT_DDB_CHECKSUM 1
-#define DISCNT_DEFAULT_DDB_FILENAME "dump.ddb"
-#define DISCNT_DEFAULT_REPL_DISKLESS_SYNC 0
-#define DISCNT_DEFAULT_REPL_DISKLESS_SYNC_DELAY 5
-#define DISCNT_DEFAULT_SLAVE_SERVE_STALE_DATA 1
-#define DISCNT_DEFAULT_SLAVE_READ_ONLY 1
-#define DISCNT_DEFAULT_REPL_DISABLE_TCP_NODELAY 0
-#define DISCNT_DEFAULT_MAXMEMORY (1024*1024*1024) /* 1gb */
-#define DISCNT_DEFAULT_ACTIVE_REHASHING 1
-#define DISCNT_DEFAULT_MIN_SLAVES_TO_WRITE 0
-#define DISCNT_DEFAULT_MIN_SLAVES_MAX_LAG 10
-#define DISCNT_IP_STR_LEN 46 /* INET6_ADDRSTRLEN is 46 but we need to be sure */
-#define DISCNT_PEER_ID_LEN (DISCNT_IP_STR_LEN+32) /* Must be enough for ip:port */
-#define DISCNT_BINDADDR_MAX 16
-#define DISCNT_MIN_RESERVED_FDS 32
-#define DISCNT_DEFAULT_LATENCY_MONITOR_THRESHOLD 0
+#define CONFIG_DEFAULT_HZ        10      /* Time interrupt calls/sec. */
+#define CONFIG_MIN_HZ            1
+#define CONFIG_MAX_HZ            500
+#define CONFIG_TIME_ERR          500     /* Desynchronization (in ms) */
+#define CONFIG_DEFAULT_SERVER_PORT 5262    /* TCP port */
+#define CONFIG_DEFAULT_TCP_BACKLOG       511     /* TCP listen backlog */
+#define CONFIG_DEFAULT_CLIENT_TIMEOUT       0       /* default client timeout: infinite */
+#define CONFIG_LINE_MAX          1024
+#define CRON_DBS_PER_CALL 16
+#define NET_MAX_WRITES_PER_EVENT (1024*64)
+#define OBJ_SHARED_INTEGERS 10000
+#define OBJ_SHARED_BULKHDR_LEN 32
+#define LOG_MAX_LEN    1024 /* Default maximum length of syslog messages */
+#define CONFIG_DEFAULT_MAX_CLIENTS 10000
+#define CONFIG_MAX_LINE 1024
+#define CONFIG_PRECISION 1
+#define CONFIG_HISTORY 10
+#define CONFIG_AUTHPASS_MAX_LEN 512
+#define CONFIG_DEFAULT_SLAVE_PRIORITY 100
+#define CONFIG_REPL_TIMEOUT 60
+#define CONFIG_REPL_PING_SLAVE_PERIOD 10
+#define CONFIG_RUN_ID_SIZE 40
+#define CONFIG_EOF_MARK_SIZE 40
+#define CONFIG_DEFAULT_REPL_BACKLOG_SIZE (1024*1024)    /* 1mb */
+#define CONFIG_DEFAULT_REPL_BACKLOG_TIME_LIMIT (60*60)  /* 1 hour */
+#define CONFIG_REPL_BACKLOG_MIN_SIZE (1024*16)          /* 16k */
+#define CONFIG_BGSAVE_RETRY_DELAY 5 /* Wait a few secs before trying again. */
+#define CONFIG_DEFAULT_PID_FILE "/var/run/discnt.pid"
+#define CONFIG_DEFAULT_SYSLOG_IDENT "discnt"
+#define CONFIG_DEFAULT_CLUSTER_CONFIG_FILE "nodes.conf"
+#define CONFIG_DEFAULT_DAEMONIZE 0
+#define CONFIG_DEFAULT_UNIX_SOCKET_PERM 0
+#define CONFIG_DEFAULT_TCP_KEEPALIVE 0
+#define CONFIG_DEFAULT_LOGFILE ""
+#define CONFIG_DEFAULT_SYSLOG_ENABLED 0
+#define CONFIG_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR 1
+#define CONFIG_DEFAULT_DDB_COMPRESSION 1
+#define CONFIG_DEFAULT_DDB_CHECKSUM 1
+#define CONFIG_DEFAULT_DDB_FILENAME "dump.ddb"
+#define CONFIG_DEFAULT_REPL_DISKLESS_SYNC 0
+#define CONFIG_DEFAULT_REPL_DISKLESS_SYNC_DELAY 5
+#define CONFIG_DEFAULT_SLAVE_SERVE_STALE_DATA 1
+#define CONFIG_DEFAULT_SLAVE_READ_ONLY 1
+#define CONFIG_DEFAULT_REPL_DISABLE_TCP_NODELAY 0
+#define CONFIG_DEFAULT_MAXMEMORY (1024*1024*1024) /* 1gb */
+#define CONFIG_DEFAULT_ACTIVE_REHASHING 1
+#define CONFIG_DEFAULT_MIN_SLAVES_TO_WRITE 0
+#define CONFIG_DEFAULT_MIN_SLAVES_MAX_LAG 10
+#define NET_IP_STR_LEN 46 /* INET6_ADDRSTRLEN is 46 but we need to be sure */
+#define NET_PEER_ID_LEN (NET_IP_STR_LEN+32) /* Must be enough for ip:port */
+#define CONFIG_BINDADDR_MAX 16
+#define CONFIG_MIN_RESERVED_FDS 32
+#define CONFIG_DEFAULT_LATENCY_MONITOR_THRESHOLD 0
 
 #define ACTIVE_EXPIRE_CYCLE_LOOKUPS_PER_LOOP 20 /* Loopkups per loop. */
 #define ACTIVE_EXPIRE_CYCLE_FAST_DURATION 1000 /* Microseconds */
@@ -131,92 +130,82 @@ typedef long long mstime_t; /* millisecond time type. */
 #define ACTIVE_EXPIRE_CYCLE_FAST 1
 
 /* Instantaneous metrics tracking. */
-#define DISCNT_METRIC_SAMPLES 16     /* Number of samples per metric. */
-#define DISCNT_METRIC_COMMAND 0      /* Number of commands executed. */
-#define DISCNT_METRIC_NET_INPUT 1    /* Bytes read to network .*/
-#define DISCNT_METRIC_NET_OUTPUT 2   /* Bytes written to network. */
-#define DISCNT_METRIC_COUNT 3
+#define STAT_METRIC_SAMPLES 16     /* Number of samples per metric. */
+#define STAT_METRIC_COMMAND 0      /* Number of commands executed. */
+#define STAT_METRIC_NET_INPUT 1    /* Bytes read to network .*/
+#define STAT_METRIC_NET_OUTPUT 2   /* Bytes written to network. */
+#define STAT_METRIC_COUNT 3
 
 /* Protocol and I/O related defines */
-#define DISCNT_MAX_QUERYBUF_LEN  (1024*1024*1024) /* 1GB max query buffer. */
-#define DISCNT_IOBUF_LEN         (1024*16)  /* Generic I/O buffer size */
-#define DISCNT_REPLY_CHUNK_BYTES (16*1024) /* 16k output buffer */
-#define DISCNT_INLINE_MAX_SIZE   (1024*64) /* Max size of inline reads */
-#define DISCNT_MBULK_BIG_ARG     (1024*32)
-#define DISCNT_LONGSTR_SIZE      21          /* Bytes needed for long -> str */
+#define PROTO_MAX_QUERYBUF_LEN  (1024*1024*1024) /* 1GB max query buffer. */
+#define PROTO_IOBUF_LEN         (1024*16)  /* Generic I/O buffer size */
+#define PROTO_REPLY_CHUNK_BYTES (16*1024) /* 16k output buffer */
+#define PROTO_INLINE_MAX_SIZE   (1024*64) /* Max size of inline reads */
+#define PROTO_MBULK_BIG_ARG     (1024*32)
+#define LONG_STR_SIZE      21          /* Bytes needed for long -> str */
+
 /* When configuring the Discnt eventloop, we setup it so that the total number
  * of file descriptors we can handle are server.maxclients + RESERVED_FDS + FDSET_INCR
  * that is our safety margin. */
-#define DISCNT_EVENTLOOP_FDSET_INCR (DISCNT_MIN_RESERVED_FDS+96)
+#define CONFIG_FDSET_INCR (CONFIG_MIN_RESERVED_FDS+96)
 
 /* Hash table parameters */
-#define DISCNT_HT_MINFILL        10      /* Minimal hash table fill 10% */
+#define HASHTABLE_MIN_FILL        10      /* Minimal hash table fill 10% */
 
 /* Command flags. Please check the command table defined in the discnt.c file
  * for more information about the meaning of every flag. */
-#define DISCNT_CMD_WRITE        (1<<0)  /* "w" flag */
-#define DISCNT_CMD_READONLY     (1<<1)  /* "r" flag */
-#define DISCNT_CMD_DENYOOM      (1<<2)  /* "m" flag */
-#define DISCNT_CMD_ADMIN        (1<<3)  /* "a" flag */
-#define DISCNT_CMD_RANDOM       (1<<4)  /* "R" flag */
-#define DISCNT_CMD_LOADING      (1<<5)  /* "l" flag */
-#define DISCNT_CMD_SKIP_MONITOR (1<<6)  /* "M" flag */
-#define DISCNT_CMD_FAST         (1<<7)  /* "F" flag */
+#define CMD_WRITE        (1<<0)  /* "w" flag */
+#define CMD_READONLY     (1<<1)  /* "r" flag */
+#define CMD_DENYOOM      (1<<2)  /* "m" flag */
+#define CMD_ADMIN        (1<<3)  /* "a" flag */
+#define CMD_RANDOM       (1<<4)  /* "R" flag */
+#define CMD_LOADING      (1<<5)  /* "l" flag */
+#define CMD_SKIP_MONITOR (1<<6)  /* "M" flag */
+#define CMD_FAST         (1<<7)  /* "F" flag */
 
 /* Object types */
-#define DISCNT_STRING 0
-#define DISCNT_LIST 1
-#define DISCNT_SET 2
-#define DISCNT_ZSET 3
-#define DISCNT_HASH 4
+#define OBJ_STRING 0
 
 /* Objects encoding. Some kind of objects like Strings and Hashes can be
  * internally represented in multiple ways. The 'encoding' field of the object
  * is set to one of this fields for this object. */
-#define DISCNT_ENCODING_RAW 0     /* Raw representation */
-#define DISCNT_ENCODING_INT 1     /* Encoded as integer */
-#define DISCNT_ENCODING_EMBSTR 2  /* Embedded sds string encoding */
+#define OBJ_ENCODING_RAW 0     /* Raw representation */
+#define OBJ_ENCODING_INT 1     /* Encoded as integer */
+#define OBJ_ENCODING_EMBSTR 2  /* Embedded sds string encoding */
 
 /* Client flags */
-#define DISCNT_MONITOR (1<<0) /* This client is a slave monitor, see MONITOR */
-#define DISCNT_BLOCKED (1<<1) /* The client is waiting in a blocking op. */
-#define DISCNT_CLOSE_AFTER_REPLY (1<<2) /* Close after writing entire reply. */
-#define DISCNT_UNBLOCKED (1<<3)   /* This client was unblocked and is stored in
+#define CLIENT_MONITOR (1<<0) /* This client is a slave monitor, see MONITOR */
+#define CLIENT_BLOCKED (1<<1) /* The client is waiting in a blocking op. */
+#define CLIENT_CLOSE_AFTER_REPLY (1<<2) /* Close after writing entire reply. */
+#define CLIENT_UNBLOCKED (1<<3)   /* This client was unblocked and is stored in
                                      server.unblocked_clients */
-#define DISCNT_CLOSE_ASAP (1<<4)  /* Close this client ASAP */
-#define DISCNT_UNIX_SOCKET (1<<5) /* Client connected via Unix domain socket */
-#define DISCNT_READONLY (1<<6)    /* Cluster client is in read-only state. */
+#define CLIENT_CLOSE_ASAP (1<<4)  /* Close this client ASAP */
+#define CLIENT_UNIX_SOCKET (1<<5) /* Client connected via Unix domain socket */
+#define CLIENT_READONLY (1<<6)    /* Cluster client is in read-only state. */
 
 /* Client block type (btype field in client structure)
- * if DISCNT_BLOCKED flag is set. */
-#define DISCNT_BLOCKED_NONE 0    /* Not blocked, no DISCNT_BLOCKED flag set. */
+ * if CLIENT_BLOCKED flag is set. */
+#define BLOCKED_NONE 0    /* Not blocked, no CLIENT_BLOCKED flag set. */
 
 /* Client request types */
-#define DISCNT_REQ_INLINE 1
-#define DISCNT_REQ_MULTIBULK 2
+#define PROTO_REQ_INLINE 1
+#define PROTO_REQ_MULTIBULK 2
 
 /* Client classes for client limits, currently used only for
  * the max-client-output-buffer limit implementation. */
-#define DISCNT_CLIENT_TYPE_NORMAL 0 /* Normal req-reply clients + MONITORs */
-#define DISCNT_CLIENT_TYPE_COUNT 1
-
-/* Synchronous read timeout - slave side */
-#define DISCNT_REPL_SYNCIO_TIMEOUT 5
-
-/* List related stuff */
-#define DISCNT_HEAD 0
-#define DISCNT_TAIL 1
+#define CLIENT_TYPE_NORMAL 0 /* Normal req-reply clients + MONITORs */
+#define CLIENT_TYPE_COUNT 1
 
 /* Log levels */
 #define LL_DEBUG 0
 #define LL_VERBOSE 1
 #define LL_NOTICE 2
 #define LL_WARNING 3
-#define DISCNT_LOG_RAW (1<<10) /* Modifier to log without timestamp */
-#define DISCNT_DEFAULT_VERBOSITY LL_NOTICE
+#define LL_RAW (1<<10) /* Modifier to log without timestamp */
+#define CONFIG_DEFAULT_VERBOSITY LL_NOTICE
 
 /* Anti-warning macro... */
-#define DISCNT_NOTUSED(V) ((void) V)
+#define UNUSED(V) ((void) V)
 
 /* SHUTDOWN flags */
 #define SHUTDOWN_NOFLAGS 0      /* No flags. */
@@ -229,20 +218,17 @@ typedef long long mstime_t; /* millisecond time type. */
 #define UNIT_MILLISECONDS 1
 
 /* Command call flags, see call() function */
-#define DISCNT_CALL_NONE 0
-#define DISCNT_CALL_STATS 2
-#define DISCNT_CALL_PROPAGATE 4
-#define DISCNT_CALL_FULL (DISCNT_CALL_STATS | DISCNT_CALL_PROPAGATE)
-
-/* Command propagation flags, see propagate() function */
-#define DISCNT_PROPAGATE_NONE 0
+#define CMD_CALL_NONE 0
+#define CMD_CALL_STATS 2
+#define CMD_CALL_PROPAGATE 4
+#define CMD_CALL_FULL (CMD_CALL_STATS | CMD_CALL_PROPAGATE)
 
 /* DDB active child save type. */
 #define DDB_CHILD_TYPE_NONE 0
 #define DDB_CHILD_TYPE_DISK 1     /* DDB is written to disk. */
 
 /* Get the first bind addr or NULL */
-#define DISCNT_BIND_ADDR (server.bindaddr_count ? server.bindaddr[0] : NULL)
+#define NET_FIRST_BIND_ADDR (server.bindaddr_count ? server.bindaddr[0] : NULL)
 
 /* Using the following macro you can run code inside serverCron() with the
  * specified period, specified in milliseconds.
@@ -277,8 +263,8 @@ typedef struct discntObject {
  * bug #85 introduced exactly in this way. */
 #define initStaticStringObject(_var,_ptr) do { \
     _var.refcount = 1; \
-    _var.type = DISCNT_STRING; \
-    _var.encoding = DISCNT_ENCODING_RAW; \
+    _var.type = OBJ_STRING; \
+    _var.encoding = OBJ_ENCODING_RAW; \
     _var.ptr = _ptr; \
 } while(0);
 
@@ -288,9 +274,10 @@ typedef struct blockingState {
     /* Generic fields. */
     mstime_t timeout;       /* Blocking operation timeout. If UNIX current time
                              * is > timeout then the operation timed out. */
-
-    /* DISCNT_BLOCKED_JOB_REPL */
-    mstime_t added_node_time; /* Last time we added a new node. */
+    uint64_t flags;         /* Generic flags different blocking operations can
+                               use in different ways. For example in order to
+                               remember command options altering the return
+                               value. */
 } blockingState;
 
 /* With multiplexing we need to take per-client state.
@@ -314,15 +301,15 @@ typedef struct client {
     time_t ctime;           /* Client creation time */
     time_t lastinteraction; /* time of the last interaction, used for timeout */
     time_t obuf_soft_limit_reached_time;
-    int flags;              /* DISCNT_SLAVE | DISCNT_MONITOR */
+    int flags;              /* DISCNT_SLAVE | CLIENT_MONITOR */
     int authenticated;      /* when requirepass is non-NULL */
-    int btype;              /* Type of blocking op if DISCNT_BLOCKED. */
+    int btype;              /* Type of blocking op if CLIENT_BLOCKED. */
     blockingState bpop;     /* blocking state */
     sds peerid;             /* Cached peer ID. */
 
     /* Response buffer */
     int bufpos;
-    char buf[DISCNT_REPLY_CHUNK_BYTES];
+    char buf[PROTO_REPLY_CHUNK_BYTES];
 } client;
 
 struct saveparam {
@@ -339,9 +326,9 @@ struct sharedObjectsStruct {
     *busykeyerr, *oomerr, *plus, *messagebulk, *pmessagebulk, *subscribebulk,
     *unsubscribebulk, *psubscribebulk, *punsubscribebulk, *loadjob, *deljob,
     *minstring, *maxstring,
-    *integers[DISCNT_SHARED_INTEGERS],
-    *mbulkhdr[DISCNT_SHARED_BULKHDR_LEN], /* "*<value>\r\n" */
-    *bulkhdr[DISCNT_SHARED_BULKHDR_LEN];  /* "$<value>\r\n" */
+    *integers[OBJ_SHARED_INTEGERS],
+    *mbulkhdr[OBJ_SHARED_BULKHDR_LEN], /* "*<value>\r\n" */
+    *bulkhdr[OBJ_SHARED_BULKHDR_LEN];  /* "$<value>\r\n" */
 };
 
 /* ZSETs use a specialized version of Skiplists */
@@ -372,7 +359,7 @@ typedef struct clientBufferLimitsConfig {
     time_t soft_limit_seconds;
 } clientBufferLimitsConfig;
 
-extern clientBufferLimitsConfig clientBufferLimitsDefaults[DISCNT_CLIENT_TYPE_COUNT];
+extern clientBufferLimitsConfig clientBufferLimitsDefaults[CLIENT_TYPE_COUNT];
 
 /*-----------------------------------------------------------------------------
  * Global server state
@@ -400,19 +387,19 @@ struct discntServer {
     char *pidfile;              /* PID file path */
     int arch_bits;              /* 32 or 64 depending on sizeof(long) */
     int cronloops;              /* Number of times the cron function run */
-    char runid[DISCNT_RUN_ID_SIZE+1];  /* ID always different at every exec. */
-    char jobid_seed[DISCNT_RUN_ID_SIZE]; /* Job ID generation seed. */
+    char runid[CONFIG_RUN_ID_SIZE+1];  /* ID always different at every exec. */
+    char jobid_seed[CONFIG_RUN_ID_SIZE]; /* Job ID generation seed. */
     /* Networking */
     int port;                   /* TCP listening port */
     int tcp_backlog;            /* TCP listen() backlog */
-    char *bindaddr[DISCNT_BINDADDR_MAX]; /* Addresses we should bind to */
+    char *bindaddr[CONFIG_BINDADDR_MAX]; /* Addresses we should bind to */
     int bindaddr_count;         /* Number of addresses in server.bindaddr[] */
     char *unixsocket;           /* UNIX socket path */
     mode_t unixsocketperm;      /* UNIX socket permission */
-    int ipfd[DISCNT_BINDADDR_MAX]; /* TCP socket file descriptors */
+    int ipfd[CONFIG_BINDADDR_MAX]; /* TCP socket file descriptors */
     int ipfd_count;             /* Used slots in ipfd[] */
     int sofd;                   /* Unix socket file descriptor */
-    int cfd[DISCNT_BINDADDR_MAX];/* Cluster bus listening socket */
+    int cfd[CONFIG_BINDADDR_MAX];/* Cluster bus listening socket */
     int cfd_count;              /* Used slots in cfd[] */
     list *clients;              /* List of active clients */
     list *clients_to_close;     /* Clients to close asynchronously */
@@ -449,18 +436,17 @@ struct discntServer {
     struct {
         long long last_sample_time; /* Timestamp of last sample in ms */
         long long last_sample_count;/* Count in last sample */
-        long long samples[DISCNT_METRIC_SAMPLES];
+        long long samples[STAT_METRIC_SAMPLES];
         int idx;
-    } inst_metric[DISCNT_METRIC_COUNT];
+    } inst_metric[STAT_METRIC_COUNT];
     /* Configuration */
     int verbosity;                  /* Loglevel in discnt.conf */
     int maxidletime;                /* Client timeout in seconds */
     int tcpkeepalive;               /* Set SO_KEEPALIVE if non-zero. */
     int active_expire_enabled;      /* Can be disabled for testing purposes. */
     size_t client_max_querybuf_len; /* Limit for client query buffer length */
-    int dbnum;                      /* Total number of configured DBs */
     int daemonize;                  /* True if running as a daemon */
-    clientBufferLimitsConfig client_obuf_limits[DISCNT_CLIENT_TYPE_COUNT];
+    clientBufferLimitsConfig client_obuf_limits[CLIENT_TYPE_COUNT];
     /* Logging */
     char *logfile;                  /* Path of log file */
     int syslog_enabled;             /* Is syslog enabled? */
@@ -577,9 +563,6 @@ typedef struct {
     dictEntry *de;
 } hashTypeIterator;
 
-#define DISCNT_HASH_KEY 1
-#define DISCNT_HASH_VALUE 2
-
 /*-----------------------------------------------------------------------------
  * Extern declarations
  *----------------------------------------------------------------------------*/
@@ -625,16 +608,16 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask);
 void acceptUnixHandler(aeEventLoop *el, int fd, void *privdata, int mask);
 void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask);
 void addReplyBulk(client *c, robj *obj);
-void addReplyBulkCString(client *c, char *s);
-void addReplyBulkCBuffer(client *c, void *p, size_t len);
+void addReplyBulkCString(client *c, const char *s);
+void addReplyBulkCBuffer(client *c, const void *p, size_t len);
 void addReplyBulkLongLong(client *c, long long ll);
 void addReply(client *c, robj *obj);
 void addReplySds(client *c, sds s);
-void addReplyString(client *c, char *s, size_t len);
+void addReplyString(client *c, const char *s, size_t len);
 void addReplyBulkSds(client *c, sds s);
-void addReplyError(client *c, char *err);
-void addReplyStatus(client *c, char *status);
-void addReplyStatusLength(client *c, char *s, size_t len);
+void addReplyError(client *c, const char *err);
+void addReplyStatus(client *c, const char *status);
+void addReplyStatusLength(client *c, const char *s, size_t len);
 void addReplyDouble(client *c, double d);
 void addReplyLongDouble(client *c, long double d);
 void addReplyLongLong(client *c, long long ll);
@@ -679,9 +662,9 @@ void incrRefCount(robj *o);
 robj *resetRefCount(robj *obj);
 void freeStringObject(robj *o);
 robj *createObject(int type, void *ptr);
-robj *createStringObject(char *ptr, size_t len);
-robj *createRawStringObject(char *ptr, size_t len);
-robj *createEmbeddedStringObject(char *ptr, size_t len);
+robj *createStringObject(const char *ptr, size_t len);
+robj *createRawStringObject(const char *ptr, size_t len);
+robj *createEmbeddedStringObject(const char *ptr, size_t len);
 robj *dupStringObject(robj *o);
 int isObjectRepresentableAsLongLong(robj *o, long long *llongval);
 robj *tryObjectEncoding(robj *o);
@@ -701,7 +684,7 @@ int compareStringObjects(robj *a, robj *b);
 int collateStringObjects(robj *a, robj *b);
 int equalStringObjects(robj *a, robj *b);
 int parseScanCursorOrReply(client *c, robj *o, unsigned long *cursor);
-#define sdsEncodedObject(objptr) (objptr->encoding == DISCNT_ENCODING_RAW || objptr->encoding == DISCNT_ENCODING_EMBSTR)
+#define sdsEncodedObject(objptr) (objptr->encoding == OBJ_ENCODING_RAW || objptr->encoding == OBJ_ENCODING_EMBSTR)
 void dictCounterDestructor(void *privdata, void *val);
 
 /* Synchronous I/O with timeout */
@@ -754,12 +737,11 @@ void loadServerConfig(char *filename, char *options);
 void appendServerSaveParams(time_t seconds, int changes);
 void resetServerSaveParams(void);
 struct rewriteConfigState; /* Forward declaration to export API. */
-void rewriteConfigRewriteLine(struct rewriteConfigState *state, char *option, sds line, int force);
+void rewriteConfigRewriteLine(struct rewriteConfigState *state, const char *option, sds line, int force);
 int rewriteConfig(char *path);
 
 /* Cluster */
 void clusterInit(void);
-unsigned short crc16(const char *buf, int len);
 void clusterCron(void);
 void clusterBeforeSleep(void);
 void clusterSendUpdate(mstime_t after);

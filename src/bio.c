@@ -56,7 +56,7 @@
  */
 
 
-#include "discnt.h"
+#include "server.h"
 #include "bio.h"
 
 static pthread_t bio_threads[DISCNT_BIO_NUM_OPS];

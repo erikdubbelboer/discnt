@@ -36,7 +36,7 @@
 
 typedef struct shard {
     clusterNode *node;
-    char         node_name[DISCNT_CLUSTER_NAMELEN];
+    char         node_name[CLUSTER_NAMELEN];
 
     /* For our shard (node == myself) this is the actual value.
      * For other shards this is our last prediction of the value.

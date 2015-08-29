@@ -1,6 +1,7 @@
-/*
- * Copyright (c) 2009-2015, Salvatore Sanfilippo <antirez at gmail dot com>
- * Copyright (c) 2009-2015, Pieter Noordhuis <pcnoordhuis at gmail dot com>
+/* SDSLib 2.0 -- A C dynamic strings library
+ *
+ * Copyright (c) 2006-2015, Salvatore Sanfilippo <antirez at gmail dot com>
+ * Copyright (c) 2015, Redis Labs, Inc
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -11,7 +12,7 @@
  *   * Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Discnt nor the names of its contributors may be used
+ *   * Neither the name of Redis nor the names of its contributors may be used
  *     to endorse or promote products derived from this software without
  *     specific prior written permission.
  *
@@ -28,36 +29,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* SDS allocator selection.
+ *
+ * This file is used in order to change the SDS allocator at compile time.
+ * Just define the following defines to what you want to use. Also add
+ * the include of your alternate allocator if needed (not needed in order
+ * to use the default libc allocator). */
 
-#ifndef __DISCNT_SKIPLIST_H
-#define __DISCNT_SKIPLIST_H
-
-#define SKIPLIST_MAXLEVEL 32 /* Should be enough for 2^32 elements */
-#define SKIPLIST_P 0.25      /* Skiplist P = 1/4 */
-
-typedef struct skiplistNode {
-    void *obj;
-    struct skiplistNode *backward;
-    struct skiplistLevel {
-        struct skiplistNode *forward;
-        unsigned int span;
-    } level[];
-} skiplistNode;
-
-typedef struct skiplist {
-    struct skiplistNode *header, *tail;
-    int (*compare)(const void *, const void *);
-    unsigned long length;
-    int level;
-} skiplist;
-
-skiplist *skiplistCreate(int (*compare)(const void *, const void *));
-void skiplistFree(skiplist *sl);
-skiplistNode *skiplistInsert(skiplist *sl, void *obj);
-int skiplistDelete(skiplist *sl, void *obj);
-void *skiplistFind(skiplist *sl, void *obj);
-void *skiplistPopHead(skiplist *sl);
-void *skiplistPopTail(skiplist *sl);
-unsigned long skiplistLength(skiplist *sl);
-
-#endif
+#include "zmalloc.h"
+#define s_malloc zmalloc
+#define s_realloc zrealloc
+#define s_free zfree

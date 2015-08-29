@@ -27,7 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "discnt.h"
+#include "server.h"
 #include "lzf.h"    /* LZF compression library */
 #include "endianconv.h"
 #include "counter.h"
@@ -118,6 +118,7 @@ sds ddbLoadSds(rio *ddb) {
         sdsfree(s);
         return NULL;
     }
+    sdssetlen(s,len);
     return s;
 }
 
@@ -206,13 +207,10 @@ int ddbSaveCounter(rio *ddb, counter* cntr) {
 
         /* We save the exact same information independent if it's our or another shard. */
 
-        if ((n = ddbSaveRawString(ddb,(unsigned char*)shrd->node_name, DISCNT_CLUSTER_NAMELEN)) == -1) return -1;
+        if ((n = ddbSaveRawString(ddb,(unsigned char*)shrd->node_name, CLUSTER_NAMELEN)) == -1) return -1;
         nwritten += n;
 
         if ((n = ddbSaveLongDouble(ddb,shrd->value)) == -1) return -1;
-        nwritten += n;
-
-        if ((n = ddbSaveLongLong(ddb,shrd->predict_time)) == -1) return -1;
         nwritten += n;
 
         if ((n = ddbSaveLongDouble(ddb,shrd->predict_value)) == -1) return -1;
@@ -226,11 +224,11 @@ int ddbSaveCounter(rio *ddb, counter* cntr) {
 }
 
 /* Produces a dump of the database in DDB format sending it to the specified
- * Redis I/O channel. On success DISCNT_OK is returned, otherwise DISCNT_ERR
+ * Redis I/O channel. On success C_OK is returned, otherwise C_ERR
  * is returned and part of the output, or all the output, can be
  * missing because of I/O errors.
  *
- * When the function returns DISCNT_ERR and if 'error' is not NULL, the
+ * When the function returns C_ERR and if 'error' is not NULL, the
  * integer pointed by 'error' is set to the value of errno just after the I/O
  * error. */
 int ddbSaveRio(rio *ddb, int *error) {
@@ -246,7 +244,7 @@ int ddbSaveRio(rio *ddb, int *error) {
 
     if (dictSize(server.counters) == 0) goto done;
     di = dictGetIterator(server.counters);
-    if (!di) return DISCNT_ERR;
+    if (!di) return C_ERR;
 
     /* Write the RESIZE DB opcode. We trim the size to UINT32_MAX, which
      * is currently the largest type we are able to represent in DDB sizes.
@@ -277,15 +275,15 @@ done:
     cksum = ddb->cksum;
     memrev64ifbe(&cksum);
     if (rioWrite(ddb,&cksum,8) == 0) goto werr;
-    return DISCNT_OK;
+    return C_OK;
 
 werr:
     if (error) *error = errno;
     if (di) dictReleaseIterator(di);
-    return DISCNT_ERR;
+    return C_ERR;
 }
 
-/* Save the DB on disk. Return DISCNT_ERR on error, DISCNT_OK on success. */
+/* Save the DB on disk. Return C_ERR on error, C_OK on success. */
 int ddbSave(char *filename) {
     char tmpfile[256];
     FILE *fp;
@@ -297,11 +295,11 @@ int ddbSave(char *filename) {
     if (!fp) {
         serverLog(LL_WARNING, "Failed opening .ddb for saving: %s",
             strerror(errno));
-        return DISCNT_ERR;
+        return C_ERR;
     }
 
     rioInitWithFile(&ddb,fp);
-    if (ddbSaveRio(&ddb,&error) == DISCNT_ERR) {
+    if (ddbSaveRio(&ddb,&error) == C_ERR) {
         errno = error;
         goto werr;
     }
@@ -316,26 +314,26 @@ int ddbSave(char *filename) {
     if (rename(tmpfile,filename) == -1) {
         serverLog(LL_WARNING,"Error moving temp DB file on the final destination: %s", strerror(errno));
         unlink(tmpfile);
-        return DISCNT_ERR;
+        return C_ERR;
     }
     serverLog(LL_NOTICE,"DB saved on disk");
     server.dirty = 0;
     server.lastsave = time(NULL);
-    server.lastbgsave_status = DISCNT_OK;
-    return DISCNT_OK;
+    server.lastbgsave_status = C_OK;
+    return C_OK;
 
 werr:
     serverLog(LL_WARNING,"Write error saving DB on disk: %s", strerror(errno));
     fclose(fp);
     unlink(tmpfile);
-    return DISCNT_ERR;
+    return C_ERR;
 }
 
 int ddbSaveBackground(char *filename) {
     pid_t childpid;
     long long start;
 
-    if (server.ddb_child_pid != -1) return DISCNT_ERR;
+    if (server.ddb_child_pid != -1) return C_ERR;
 
     server.dirty_before_bgsave = server.dirty;
     server.lastbgsave_try = time(NULL);
@@ -348,7 +346,7 @@ int ddbSaveBackground(char *filename) {
         closeListeningSockets(0);
         serverSetProcTitle("discnt-ddb-bgsave");
         retval = ddbSave(filename);
-        if (retval == DISCNT_OK) {
+        if (retval == C_OK) {
             size_t private_dirty = zmalloc_get_private_dirty();
 
             if (private_dirty) {
@@ -357,26 +355,26 @@ int ddbSaveBackground(char *filename) {
                     private_dirty/(1024*1024));
             }
         }
-        exitFromChild((retval == DISCNT_OK) ? 0 : 1);
+        exitFromChild((retval == C_OK) ? 0 : 1);
     } else {
         /* Parent */
         server.stat_fork_time = ustime()-start;
         server.stat_fork_rate = (double) zmalloc_used_memory() * 1000000 / server.stat_fork_time / (1024*1024*1024); /* GB per second. */
         latencyAddSampleIfNeeded("fork",server.stat_fork_time/1000);
         if (childpid == -1) {
-            server.lastbgsave_status = DISCNT_ERR;
+            server.lastbgsave_status = C_ERR;
             serverLog(LL_WARNING,"Can't save in background: fork: %s",
                 strerror(errno));
-            return DISCNT_ERR;
+            return C_ERR;
         }
         serverLog(LL_NOTICE,"Background saving started by pid %d",childpid);
         server.ddb_save_time_start = time(NULL);
         server.ddb_child_pid = childpid;
         server.ddb_child_type = DDB_CHILD_TYPE_DISK;
         updateDictResizePolicy();
-        return DISCNT_OK;
+        return C_OK;
     }
-    return DISCNT_OK; /* unreached */
+    return C_OK; /* unreached */
 }
 
 void ddbRemoveTempFile(pid_t childpid) {
@@ -413,17 +411,15 @@ int ddbLoadCounter(rio *ddb) {
 
         if ((name = ddbLoadSds(ddb)) == NULL) goto rerr;
 
-        if (sdslen(name) != DISCNT_CLUSTER_NAMELEN) {
+        if (sdslen(name) != CLUSTER_NAMELEN) {
             sdsfree(name);
             goto rerr;
         }
 
-        memcpy(shrd->node_name,name,DISCNT_CLUSTER_NAMELEN);
+        memcpy(shrd->node_name,name,CLUSTER_NAMELEN);
         sdsfree(name);
 
         if (ddbLoadLongDouble(ddb,&shrd->value) == -1) goto rerr;
-
-        if (ddbLoadLongLong(ddb,&shrd->predict_time) == -1) goto rerr;
 
         if (ddbLoadLongDouble(ddb,&shrd->predict_value) == -1) goto rerr;
 
@@ -504,7 +500,7 @@ int ddbLoad(char *filename) {
     FILE *fp;
     rio ddb;
 
-    if ((fp = fopen(filename,"r")) == NULL) return DISCNT_ERR;
+    if ((fp = fopen(filename,"r")) == NULL) return C_ERR;
 
     rioInitWithFile(&ddb,fp);
     ddb.update_cksum = ddbLoadProgressCallback;
@@ -515,14 +511,14 @@ int ddbLoad(char *filename) {
         fclose(fp);
         serverLog(LL_WARNING,"Wrong signature trying to load DB from file");
         errno = EINVAL;
-        return DISCNT_ERR;
+        return C_ERR;
     }
     ddbver = atoi(buf+6);
     if (ddbver < 1 || ddbver > DDB_VERSION) {
         fclose(fp);
         serverLog(LL_WARNING,"Can't handle DDB format version %d",ddbver);
         errno = EINVAL;
-        return DISCNT_ERR;
+        return C_ERR;
     }
 
     startLoading(fp);
@@ -564,12 +560,12 @@ int ddbLoad(char *filename) {
     countersUpdateValues();
 
     stopLoading();
-    return DISCNT_OK;
+    return C_OK;
 
 eoferr: /* unexpected end of file is handled here with a fatal exit */
     serverLog(LL_WARNING,"Short read or OOM loading DB. Unrecoverable error, aborting now.");
     ddbExitReportCorruptDDB("Unexpected EOF reading DDB file");
-    return DISCNT_ERR; /* Just to avoid warning */
+    return C_ERR; /* Just to avoid warning */
 }
 
 /* A background saving child (BGSAVE) terminated its work. Handle this.
@@ -580,10 +576,10 @@ void backgroundSaveDoneHandlerDisk(int exitcode, int bysignal) {
             "Background saving terminated with success");
         server.dirty = server.dirty - server.dirty_before_bgsave;
         server.lastsave = time(NULL);
-        server.lastbgsave_status = DISCNT_OK;
+        server.lastbgsave_status = C_OK;
     } else if (!bysignal && exitcode != 0) {
         serverLog(LL_WARNING, "Background saving error");
-        server.lastbgsave_status = DISCNT_ERR;
+        server.lastbgsave_status = C_ERR;
     } else {
         mstime_t latency;
 
@@ -596,7 +592,7 @@ void backgroundSaveDoneHandlerDisk(int exitcode, int bysignal) {
         /* SIGUSR1 is whitelisted, so we have a way to kill a child without
          * tirggering an error conditon. */
         if (bysignal != SIGUSR1)
-            server.lastbgsave_status = DISCNT_ERR;
+            server.lastbgsave_status = C_ERR;
     }
     server.ddb_child_pid = -1;
     server.ddb_child_type = DDB_CHILD_TYPE_NONE;
@@ -621,7 +617,7 @@ void saveCommand(client *c) {
         addReplyError(c,"Background save already in progress");
         return;
     }
-    if (ddbSave(server.ddb_filename) == DISCNT_OK) {
+    if (ddbSave(server.ddb_filename) == C_OK) {
         addReply(c,shared.ok);
     } else {
         addReply(c,shared.err);
@@ -631,7 +627,7 @@ void saveCommand(client *c) {
 void bgsaveCommand(client *c) {
     if (server.ddb_child_pid != -1) {
         addReplyError(c,"Background save already in progress");
-    } else if (ddbSaveBackground(server.ddb_filename) == DISCNT_OK) {
+    } else if (ddbSaveBackground(server.ddb_filename) == C_OK) {
         addReplyStatus(c,"Background saving started");
     } else {
         addReply(c,shared.err);

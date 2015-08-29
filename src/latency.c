@@ -33,11 +33,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "discnt.h"
+#include "server.h"
 
 /* Dictionary type for latency events. */
 int dictStringKeyCompare(void *privdata, const void *key1, const void *key2) {
-    DISCNT_NOTUSED(privdata);
+    UNUSED(privdata);
     return strcmp(key1,key2) == 0;
 }
 
@@ -213,7 +213,7 @@ sds createLatencyReport(void) {
     dictEntry *de;
     int eventnum = 0;
 
-    di = dictGetIterator(server.latency_events);
+    di = dictGetSafeIterator(server.latency_events);
     while((de = dictNext(di)) != NULL) {
         char *event = dictGetKey(de);
         struct latencyTimeSeries *ts = dictGetVal(de);

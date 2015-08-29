@@ -10,7 +10,7 @@
  *   * Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Discnt nor the names of its contributors may be used
+ *   * Neither the name of Disque nor the names of its contributors may be used
  *     to endorse or promote products derived from this software without
  *     specific prior written permission.
  *
@@ -27,27 +27,27 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "discnt.h"
+#include "server.h"
 #include <sys/uio.h>
 #include <math.h>
 
 static void setProtocolError(client *c, int pos);
 
-/* To evaluate the output buffer size of a client we need to get size of
- * allocated objects, however we can't used zmalloc_size() directly on sds
- * strings because of the trick they use to work (the header is before the
- * returned pointer), so we use this helper function. */
-size_t zmalloc_size_sds(sds s) {
-    return zmalloc_size(s-sizeof(struct sdshdr));
+/* Return the size consumed from the allocator, for the specified SDS string,
+ * including internal fragmentation. This function is used in order to compute
+ * the client output buffer size. */
+size_t sdsZmallocSize(sds s) {
+    void *sh = sdsAllocPtr(s);
+    return zmalloc_size(sh);
 }
 
 /* Return the amount of memory used by the sds string at object->ptr
  * for a string object. */
 size_t getStringObjectSdsUsedMemory(robj *o) {
-    serverAssertWithInfo(NULL,o,o->type == DISCNT_STRING);
+    serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
     switch(o->encoding) {
-    case DISCNT_ENCODING_RAW: return zmalloc_size_sds(o->ptr);
-    case DISCNT_ENCODING_EMBSTR: return sdslen(o->ptr);
+    case OBJ_ENCODING_RAW: return sdsZmallocSize(o->ptr);
+    case OBJ_ENCODING_EMBSTR: return zmalloc_size(o)-sizeof(robj);
     default: return 0; /* Just integer encoding for now. */
     }
 }
@@ -65,7 +65,7 @@ client *createClient(int fd) {
     client *c = zmalloc(sizeof(client));
 
     /* passing -1 as fd it is possible to create a non connected client.
-     * This is useful since all the Discnt commands needs to be executed
+     * This is useful since all the commands needs to be executed
      * in the context of a client. When commands are executed in other
      * contexts (for instance a Lua script) we need a non connected client. */
     if (fd != -1) {
@@ -103,8 +103,7 @@ client *createClient(int fd) {
     c->obuf_soft_limit_reached_time = 0;
     listSetFreeMethod(c->reply,decrRefCountVoid);
     listSetDupMethod(c->reply,dupClientReplyValue);
-    c->btype = DISCNT_BLOCKED_NONE;
-    c->bpop.timeout = 0;
+    c->btype = BLOCKED_NONE;
     c->peerid = NULL;
     if (fd != -1) listAddNodeTail(server.clients,c);
     return c;
@@ -114,22 +113,22 @@ client *createClient(int fd) {
  * to the client. The behavior is the following:
  *
  * If the client should receive new data (normal clients will) the function
- * returns DISCNT_OK, and make sure to install the write handler in our event
+ * returns C_OK, and make sure to install the write handler in our event
  * loop so that when the socket is writable new data gets written.
  *
  * If the client should not receive new data, because it is a fake client,
  * a master, a slave not yet online, or because the setup of the write handler
- * failed, the function returns DISCNT_ERR.
+ * failed, the function returns C_ERR.
  *
  * Typically gets called every time a reply is built, before adding more
- * data to the clients output buffers. If the function returns DISCNT_ERR no
+ * data to the clients output buffers. If the function returns C_ERR no
  * data should be appended to the output buffers. */
 int prepareClientToWrite(client *c) {
-    if (c->fd <= 0) return DISCNT_ERR; /* Fake client */
+    if (c->fd <= 0) return C_ERR; /* Fake client */
     if (c->bufpos == 0 && listLength(c->reply) == 0 &&
         aeCreateFileEvent(server.el, c->fd, AE_WRITABLE,
-        sendReplyToClient, c) == AE_ERR) return DISCNT_ERR;
-    return DISCNT_OK;
+        sendReplyToClient, c) == AE_ERR) return C_ERR;
+    return C_OK;
 }
 
 /* Create a duplicate of the last object in the reply list when
@@ -152,27 +151,27 @@ robj *dupLastObjectIfNeeded(list *reply) {
  * Low level functions to add more data to output buffers.
  * -------------------------------------------------------------------------- */
 
-int _addReplyToBuffer(client *c, char *s, size_t len) {
+int _addReplyToBuffer(client *c, const char *s, size_t len) {
     size_t available = sizeof(c->buf)-c->bufpos;
 
-    if (c->flags & DISCNT_CLOSE_AFTER_REPLY) return DISCNT_OK;
+    if (c->flags & CLIENT_CLOSE_AFTER_REPLY) return C_OK;
 
     /* If there already are entries in the reply list, we cannot
      * add anything more to the static buffer. */
-    if (listLength(c->reply) > 0) return DISCNT_ERR;
+    if (listLength(c->reply) > 0) return C_ERR;
 
     /* Check that the buffer has enough space available for this string. */
-    if (len > available) return DISCNT_ERR;
+    if (len > available) return C_ERR;
 
     memcpy(c->buf+c->bufpos,s,len);
     c->bufpos+=len;
-    return DISCNT_OK;
+    return C_OK;
 }
 
 void _addReplyObjectToList(client *c, robj *o) {
     robj *tail;
 
-    if (c->flags & DISCNT_CLOSE_AFTER_REPLY) return;
+    if (c->flags & CLIENT_CLOSE_AFTER_REPLY) return;
 
     if (listLength(c->reply) == 0) {
         incrRefCount(o);
@@ -183,13 +182,13 @@ void _addReplyObjectToList(client *c, robj *o) {
 
         /* Append to this object when possible. */
         if (tail->ptr != NULL &&
-            tail->encoding == DISCNT_ENCODING_RAW &&
-            sdslen(tail->ptr)+sdslen(o->ptr) <= DISCNT_REPLY_CHUNK_BYTES)
+            tail->encoding == OBJ_ENCODING_RAW &&
+            sdslen(tail->ptr)+sdslen(o->ptr) <= PROTO_REPLY_CHUNK_BYTES)
         {
-            c->reply_bytes -= zmalloc_size_sds(tail->ptr);
+            c->reply_bytes -= sdsZmallocSize(tail->ptr);
             tail = dupLastObjectIfNeeded(c->reply);
             tail->ptr = sdscatlen(tail->ptr,o->ptr,sdslen(o->ptr));
-            c->reply_bytes += zmalloc_size_sds(tail->ptr);
+            c->reply_bytes += sdsZmallocSize(tail->ptr);
         } else {
             incrRefCount(o);
             listAddNodeTail(c->reply,o);
@@ -204,38 +203,38 @@ void _addReplyObjectToList(client *c, robj *o) {
 void _addReplySdsToList(client *c, sds s) {
     robj *tail;
 
-    if (c->flags & DISCNT_CLOSE_AFTER_REPLY) {
+    if (c->flags & CLIENT_CLOSE_AFTER_REPLY) {
         sdsfree(s);
         return;
     }
 
     if (listLength(c->reply) == 0) {
-        listAddNodeTail(c->reply,createObject(DISCNT_STRING,s));
-        c->reply_bytes += zmalloc_size_sds(s);
+        listAddNodeTail(c->reply,createObject(OBJ_STRING,s));
+        c->reply_bytes += sdsZmallocSize(s);
     } else {
         tail = listNodeValue(listLast(c->reply));
 
         /* Append to this object when possible. */
-        if (tail->ptr != NULL && tail->encoding == DISCNT_ENCODING_RAW &&
-            sdslen(tail->ptr)+sdslen(s) <= DISCNT_REPLY_CHUNK_BYTES)
+        if (tail->ptr != NULL && tail->encoding == OBJ_ENCODING_RAW &&
+            sdslen(tail->ptr)+sdslen(s) <= PROTO_REPLY_CHUNK_BYTES)
         {
-            c->reply_bytes -= zmalloc_size_sds(tail->ptr);
+            c->reply_bytes -= sdsZmallocSize(tail->ptr);
             tail = dupLastObjectIfNeeded(c->reply);
             tail->ptr = sdscatlen(tail->ptr,s,sdslen(s));
-            c->reply_bytes += zmalloc_size_sds(tail->ptr);
+            c->reply_bytes += sdsZmallocSize(tail->ptr);
             sdsfree(s);
         } else {
-            listAddNodeTail(c->reply,createObject(DISCNT_STRING,s));
-            c->reply_bytes += zmalloc_size_sds(s);
+            listAddNodeTail(c->reply,createObject(OBJ_STRING,s));
+            c->reply_bytes += sdsZmallocSize(s);
         }
     }
     asyncCloseClientOnOutputBufferLimitReached(c);
 }
 
-void _addReplyStringToList(client *c, char *s, size_t len) {
+void _addReplyStringToList(client *c, const char *s, size_t len) {
     robj *tail;
 
-    if (c->flags & DISCNT_CLOSE_AFTER_REPLY) return;
+    if (c->flags & CLIENT_CLOSE_AFTER_REPLY) return;
 
     if (listLength(c->reply) == 0) {
         robj *o = createStringObject(s,len);
@@ -246,13 +245,13 @@ void _addReplyStringToList(client *c, char *s, size_t len) {
         tail = listNodeValue(listLast(c->reply));
 
         /* Append to this object when possible. */
-        if (tail->ptr != NULL && tail->encoding == DISCNT_ENCODING_RAW &&
-            sdslen(tail->ptr)+len <= DISCNT_REPLY_CHUNK_BYTES)
+        if (tail->ptr != NULL && tail->encoding == OBJ_ENCODING_RAW &&
+            sdslen(tail->ptr)+len <= PROTO_REPLY_CHUNK_BYTES)
         {
-            c->reply_bytes -= zmalloc_size_sds(tail->ptr);
+            c->reply_bytes -= sdsZmallocSize(tail->ptr);
             tail = dupLastObjectIfNeeded(c->reply);
             tail->ptr = sdscatlen(tail->ptr,s,len);
-            c->reply_bytes += zmalloc_size_sds(tail->ptr);
+            c->reply_bytes += sdsZmallocSize(tail->ptr);
         } else {
             robj *o = createStringObject(s,len);
 
@@ -269,7 +268,7 @@ void _addReplyStringToList(client *c, char *s, size_t len) {
  * -------------------------------------------------------------------------- */
 
 void addReply(client *c, robj *obj) {
-    if (prepareClientToWrite(c) != DISCNT_OK) return;
+    if (prepareClientToWrite(c) != C_OK) return;
 
     /* This is an important place where we can avoid copy-on-write
      * when there is a saving child running, avoiding touching the
@@ -279,9 +278,9 @@ void addReply(client *c, robj *obj) {
      * we'll be able to send the object to the client without
      * messing with its page. */
     if (sdsEncodedObject(obj)) {
-        if (_addReplyToBuffer(c,obj->ptr,sdslen(obj->ptr)) != DISCNT_OK)
+        if (_addReplyToBuffer(c,obj->ptr,sdslen(obj->ptr)) != C_OK)
             _addReplyObjectToList(c,obj);
-    } else if (obj->encoding == DISCNT_ENCODING_INT) {
+    } else if (obj->encoding == OBJ_ENCODING_INT) {
         /* Optimization: if there is room in the static buffer for 32 bytes
          * (more than the max chars a 64 bit integer can take as string) we
          * avoid decoding the object and go for the lower level approach. */
@@ -290,13 +289,13 @@ void addReply(client *c, robj *obj) {
             int len;
 
             len = ll2string(buf,sizeof(buf),(long)obj->ptr);
-            if (_addReplyToBuffer(c,buf,len) == DISCNT_OK)
+            if (_addReplyToBuffer(c,buf,len) == C_OK)
                 return;
             /* else... continue with the normal code path, but should never
              * happen actually since we verified there is room. */
         }
         obj = getDecodedObject(obj);
-        if (_addReplyToBuffer(c,obj->ptr,sdslen(obj->ptr)) != DISCNT_OK)
+        if (_addReplyToBuffer(c,obj->ptr,sdslen(obj->ptr)) != C_OK)
             _addReplyObjectToList(c,obj);
         decrRefCount(obj);
     } else {
@@ -305,12 +304,12 @@ void addReply(client *c, robj *obj) {
 }
 
 void addReplySds(client *c, sds s) {
-    if (prepareClientToWrite(c) != DISCNT_OK) {
+    if (prepareClientToWrite(c) != C_OK) {
         /* The caller expects the sds to be free'd. */
         sdsfree(s);
         return;
     }
-    if (_addReplyToBuffer(c,s,sdslen(s)) == DISCNT_OK) {
+    if (_addReplyToBuffer(c,s,sdslen(s)) == C_OK) {
         sdsfree(s);
     } else {
         /* This method free's the sds when it is no longer needed. */
@@ -318,19 +317,19 @@ void addReplySds(client *c, sds s) {
     }
 }
 
-void addReplyString(client *c, char *s, size_t len) {
-    if (prepareClientToWrite(c) != DISCNT_OK) return;
-    if (_addReplyToBuffer(c,s,len) != DISCNT_OK)
+void addReplyString(client *c, const char *s, size_t len) {
+    if (prepareClientToWrite(c) != C_OK) return;
+    if (_addReplyToBuffer(c,s,len) != C_OK)
         _addReplyStringToList(c,s,len);
 }
 
-void addReplyErrorLength(client *c, char *s, size_t len) {
+void addReplyErrorLength(client *c, const char *s, size_t len) {
     addReplyString(c,"-ERR ",5);
     addReplyString(c,s,len);
     addReplyString(c,"\r\n",2);
 }
 
-void addReplyError(client *c, char *err) {
+void addReplyError(client *c, const char *err) {
     addReplyErrorLength(c,err,strlen(err));
 }
 
@@ -350,13 +349,13 @@ void addReplyErrorFormat(client *c, const char *fmt, ...) {
     sdsfree(s);
 }
 
-void addReplyStatusLength(client *c, char *s, size_t len) {
+void addReplyStatusLength(client *c, const char *s, size_t len) {
     addReplyString(c,"+",1);
     addReplyString(c,s,len);
     addReplyString(c,"\r\n",2);
 }
 
-void addReplyStatus(client *c, char *status) {
+void addReplyStatus(client *c, const char *status) {
     addReplyStatusLength(c,status,strlen(status));
 }
 
@@ -375,8 +374,8 @@ void *addDeferredMultiBulkLength(client *c) {
     /* Note that we install the write event here even if the object is not
      * ready to be sent, since we are sure that before returning to the
      * event loop setDeferredMultiBulkLength() will be called. */
-    if (prepareClientToWrite(c) != DISCNT_OK) return NULL;
-    listAddNodeTail(c->reply,createObject(DISCNT_STRING,NULL));
+    if (prepareClientToWrite(c) != C_OK) return NULL;
+    listAddNodeTail(c->reply,createObject(OBJ_STRING,NULL));
     return listLast(c->reply);
 }
 
@@ -390,17 +389,17 @@ void setDeferredMultiBulkLength(client *c, void *node, long length) {
 
     len = listNodeValue(ln);
     len->ptr = sdscatprintf(sdsempty(),"*%ld\r\n",length);
-    len->encoding = DISCNT_ENCODING_RAW; /* in case it was an EMBSTR. */
-    c->reply_bytes += zmalloc_size_sds(len->ptr);
+    len->encoding = OBJ_ENCODING_RAW; /* in case it was an EMBSTR. */
+    c->reply_bytes += sdsZmallocSize(len->ptr);
     if (ln->next != NULL) {
         next = listNodeValue(ln->next);
 
         /* Only glue when the next node is non-NULL (an sds in this case) */
         if (next->ptr != NULL) {
-            c->reply_bytes -= zmalloc_size_sds(len->ptr);
+            c->reply_bytes -= sdsZmallocSize(len->ptr);
             c->reply_bytes -= getStringObjectSdsUsedMemory(next);
             len->ptr = sdscatlen(len->ptr,next->ptr,sdslen(next->ptr));
-            c->reply_bytes += zmalloc_size_sds(len->ptr);
+            c->reply_bytes += sdsZmallocSize(len->ptr);
             listDelNode(c->reply,ln->next);
         }
     }
@@ -423,15 +422,15 @@ void addReplyDouble(client *c, double d) {
 }
 
 /* Add a long double as a bulk reply */
-void addReplyLongDouble(client *c, double long d) {
+void addReplyLongDouble(client *c, long double ld) {
     char dbuf[128], sbuf[128];
     int dlen, slen;
-    if (isinf(d)) {
+    if (isinf(ld)) {
         /* Libc in odd systems (Hi Solaris!) will format infinite in a
          * different way, so better to handle it in an explicit way. */
-        addReplyBulkCString(c, d > 0 ? "inf" : "-inf");
+        addReplyBulkCString(c, ld > 0 ? "inf" : "-inf");
     } else {
-        dlen = snprintf(dbuf,sizeof(dbuf),"%.17Lg",d);
+        dlen = snprintf(dbuf,sizeof(dbuf),"%.17Lg",ld);
         slen = snprintf(sbuf,sizeof(sbuf),"$%d\r\n%s\r\n",dlen,dbuf);
         addReplyString(c,sbuf,slen);
     }
@@ -446,10 +445,10 @@ void addReplyLongLongWithPrefix(client *c, long long ll, char prefix) {
     /* Things like $3\r\n or *2\r\n are emitted very often by the protocol
      * so we have a few shared objects to use if the integer is small
      * like it is most of the times. */
-    if (prefix == '*' && ll < DISCNT_SHARED_BULKHDR_LEN) {
+    if (prefix == '*' && ll < OBJ_SHARED_BULKHDR_LEN) {
         addReply(c,shared.mbulkhdr[ll]);
         return;
-    } else if (prefix == '$' && ll < DISCNT_SHARED_BULKHDR_LEN) {
+    } else if (prefix == '$' && ll < OBJ_SHARED_BULKHDR_LEN) {
         addReply(c,shared.bulkhdr[ll]);
         return;
     }
@@ -471,7 +470,7 @@ void addReplyLongLong(client *c, long long ll) {
 }
 
 void addReplyMultiBulkLen(client *c, long length) {
-    if (length < DISCNT_SHARED_BULKHDR_LEN)
+    if (length < OBJ_SHARED_BULKHDR_LEN)
         addReply(c,shared.mbulkhdr[length]);
     else
         addReplyLongLongWithPrefix(c,length,'*');
@@ -497,13 +496,13 @@ void addReplyBulkLen(client *c, robj *obj) {
         }
     }
 
-    if (len < DISCNT_SHARED_BULKHDR_LEN)
+    if (len < OBJ_SHARED_BULKHDR_LEN)
         addReply(c,shared.bulkhdr[len]);
     else
         addReplyLongLongWithPrefix(c,len,'$');
 }
 
-/* Add a Discnt Object as a bulk reply */
+/* Add a Disque Object as a bulk reply */
 void addReplyBulk(client *c, robj *obj) {
     addReplyBulkLen(c,obj);
     addReply(c,obj);
@@ -511,7 +510,7 @@ void addReplyBulk(client *c, robj *obj) {
 }
 
 /* Add a C buffer as bulk reply */
-void addReplyBulkCBuffer(client *c, void *p, size_t len) {
+void addReplyBulkCBuffer(client *c, const void *p, size_t len) {
     addReplyLongLongWithPrefix(c,len,'$');
     addReplyString(c,p,len);
     addReply(c,shared.crlf);
@@ -526,7 +525,7 @@ void addReplyBulkSds(client *c, sds s)  {
 }
 
 /* Add a C nul term string as bulk reply */
-void addReplyBulkCString(client *c, char *s) {
+void addReplyBulkCString(client *c, const char *s) {
     if (s == NULL) {
         addReply(c,shared.nullbulk);
     } else {
@@ -585,10 +584,10 @@ static void acceptCommonHandler(int fd, int flags) {
 
 void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     int cport, cfd, max = MAX_ACCEPTS_PER_CALL;
-    char cip[DISCNT_IP_STR_LEN];
-    DISCNT_NOTUSED(el);
-    DISCNT_NOTUSED(mask);
-    DISCNT_NOTUSED(privdata);
+    char cip[NET_IP_STR_LEN];
+    UNUSED(el);
+    UNUSED(mask);
+    UNUSED(privdata);
 
     while(max--) {
         cfd = anetTcpAccept(server.neterr, fd, cip, sizeof(cip), &cport);
@@ -605,9 +604,9 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
 
 void acceptUnixHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     int cfd, max = MAX_ACCEPTS_PER_CALL;
-    DISCNT_NOTUSED(el);
-    DISCNT_NOTUSED(mask);
-    DISCNT_NOTUSED(privdata);
+    UNUSED(el);
+    UNUSED(mask);
+    UNUSED(privdata);
 
     while(max--) {
         cfd = anetUnixAccept(server.neterr, fd);
@@ -618,7 +617,7 @@ void acceptUnixHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
             return;
         }
         serverLog(LL_VERBOSE,"Accepted connection to %s", server.unixsocket);
-        acceptCommonHandler(cfd,DISCNT_UNIX_SOCKET);
+        acceptCommonHandler(cfd,CLIENT_UNIX_SOCKET);
     }
 }
 
@@ -641,7 +640,7 @@ void freeClient(client *c) {
     c->querybuf = NULL;
 
     /* Deallocate structures used to block on blocking ops. */
-    if (c->flags & DISCNT_BLOCKED) unblockClient(c);
+    if (c->flags & CLIENT_BLOCKED) unblockClient(c);
 
     /* Close socket, unregister events, and remove list of replies and
      * accumulated arguments. */
@@ -662,14 +661,14 @@ void freeClient(client *c) {
 
     /* When client was just unblocked because of a blocking operation,
      * remove it from the list of unblocked clients. */
-    if (c->flags & DISCNT_UNBLOCKED) {
+    if (c->flags & CLIENT_UNBLOCKED) {
         ln = listSearchKey(server.unblocked_clients,c);
         serverAssert(ln != NULL);
         listDelNode(server.unblocked_clients,ln);
     }
 
     /* Monitors cleanup. */
-    if (c->flags & DISCNT_MONITOR) {
+    if (c->flags & CLIENT_MONITOR) {
         ln = listSearchKey(server.monitors,c);
         serverAssert(ln != NULL);
         listDelNode(server.monitors,ln);
@@ -677,7 +676,7 @@ void freeClient(client *c) {
 
     /* If this client was scheduled for async freeing we need to remove it
      * from the queue. */
-    if (c->flags & DISCNT_CLOSE_ASAP) {
+    if (c->flags & CLIENT_CLOSE_ASAP) {
         ln = listSearchKey(server.clients_to_close,c);
         serverAssert(ln != NULL);
         listDelNode(server.clients_to_close,ln);
@@ -696,8 +695,8 @@ void freeClient(client *c) {
  * a context where calling freeClient() is not possible, because the client
  * should be valid for the continuation of the flow of the program. */
 void freeClientAsync(client *c) {
-    if (c->flags & DISCNT_CLOSE_ASAP) return;
-    c->flags |= DISCNT_CLOSE_ASAP;
+    if (c->flags & CLIENT_CLOSE_ASAP) return;
+    c->flags |= CLIENT_CLOSE_ASAP;
     listAddNodeTail(server.clients_to_close,c);
 }
 
@@ -706,7 +705,7 @@ void freeClientsInAsyncFreeQueue(void) {
         listNode *ln = listFirst(server.clients_to_close);
         client *c = listNodeValue(ln);
 
-        c->flags &= ~DISCNT_CLOSE_ASAP;
+        c->flags &= ~CLIENT_CLOSE_ASAP;
         freeClient(c);
         listDelNode(server.clients_to_close,ln);
     }
@@ -717,8 +716,8 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     int nwritten = 0, totwritten = 0, objlen;
     size_t objmem;
     robj *o;
-    DISCNT_NOTUSED(el);
-    DISCNT_NOTUSED(mask);
+    UNUSED(el);
+    UNUSED(mask);
 
     while(c->bufpos > 0 || listLength(c->reply)) {
         if (c->bufpos > 0) {
@@ -756,7 +755,7 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
                 c->reply_bytes -= objmem;
             }
         }
-        /* Note that we avoid to send more than DISCNT_MAX_WRITE_PER_EVENT
+        /* Note that we avoid to send more than NET_MAX_WRITES_PER_EVENT
          * bytes, in a single threaded server it's a good idea to serve
          * other clients as well, even if a very large request comes from
          * super fast link that is always able to accept data (in real world
@@ -765,7 +764,7 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
          * However if we are over the maxmemory limit we ignore that and
          * just deliver as much data as it is possible to deliver. */
         server.stat_net_output_bytes += totwritten;
-        if (totwritten > DISCNT_MAX_WRITE_PER_EVENT &&
+        if (totwritten > NET_MAX_WRITES_PER_EVENT &&
             (server.maxmemory == 0 ||
              zmalloc_used_memory() < server.maxmemory)) break;
     }
@@ -785,7 +784,7 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         aeDeleteFileEvent(server.el,c->fd,AE_WRITABLE);
 
         /* Close connection after entire reply has been sent. */
-        if (c->flags & DISCNT_CLOSE_AFTER_REPLY) freeClient(c);
+        if (c->flags & CLIENT_CLOSE_AFTER_REPLY) freeClient(c);
     }
 }
 
@@ -808,11 +807,11 @@ int processInlineBuffer(client *c) {
 
     /* Nothing to do without a \r\n */
     if (newline == NULL) {
-        if (sdslen(c->querybuf) > DISCNT_INLINE_MAX_SIZE) {
+        if (sdslen(c->querybuf) > PROTO_INLINE_MAX_SIZE) {
             addReplyError(c,"Protocol error: too big inline request");
             setProtocolError(c,0);
         }
-        return DISCNT_ERR;
+        return C_ERR;
     }
 
     /* Handle the \r\n case. */
@@ -827,7 +826,7 @@ int processInlineBuffer(client *c) {
     if (argv == NULL) {
         addReplyError(c,"Protocol error: unbalanced quotes in request");
         setProtocolError(c,0);
-        return DISCNT_ERR;
+        return C_ERR;
     }
 
     /* Leave data after the first line of the query in the buffer */
@@ -837,17 +836,17 @@ int processInlineBuffer(client *c) {
     if (c->argv) zfree(c->argv);
     c->argv = zmalloc(sizeof(robj*)*argc);
 
-    /* Create discnt objects for all arguments. */
+    /* Create disque objects for all arguments. */
     for (c->argc = 0, j = 0; j < argc; j++) {
         if (sdslen(argv[j])) {
-            c->argv[c->argc] = createObject(DISCNT_STRING,argv[j]);
+            c->argv[c->argc] = createObject(OBJ_STRING,argv[j]);
             c->argc++;
         } else {
             sdsfree(argv[j]);
         }
     }
     zfree(argv);
-    return DISCNT_OK;
+    return C_OK;
 }
 
 /* Helper function. Trims query buffer to make the function that processes
@@ -859,7 +858,7 @@ static void setProtocolError(client *c, int pos) {
             "Protocol error from client: %s", client);
         sdsfree(client);
     }
-    c->flags |= DISCNT_CLOSE_AFTER_REPLY;
+    c->flags |= CLIENT_CLOSE_AFTER_REPLY;
     sdsrange(c->querybuf,pos,-1);
 }
 
@@ -875,16 +874,16 @@ int processMultibulkBuffer(client *c) {
         /* Multi bulk length cannot be read without a \r\n */
         newline = strchr(c->querybuf,'\r');
         if (newline == NULL) {
-            if (sdslen(c->querybuf) > DISCNT_INLINE_MAX_SIZE) {
+            if (sdslen(c->querybuf) > PROTO_INLINE_MAX_SIZE) {
                 addReplyError(c,"Protocol error: too big mbulk count string");
                 setProtocolError(c,0);
             }
-            return DISCNT_ERR;
+            return C_ERR;
         }
 
         /* Buffer should also contain \n */
         if (newline-(c->querybuf) > ((signed)sdslen(c->querybuf)-2))
-            return DISCNT_ERR;
+            return C_ERR;
 
         /* We know for sure there is a whole line since newline != NULL,
          * so go ahead and find out the multi bulk length. */
@@ -893,13 +892,13 @@ int processMultibulkBuffer(client *c) {
         if (!ok || ll > 1024*1024) {
             addReplyError(c,"Protocol error: invalid multibulk length");
             setProtocolError(c,pos);
-            return DISCNT_ERR;
+            return C_ERR;
         }
 
         pos = (newline-c->querybuf)+2;
         if (ll <= 0) {
             sdsrange(c->querybuf,pos,-1);
-            return DISCNT_OK;
+            return C_OK;
         }
 
         c->multibulklen = ll;
@@ -915,11 +914,11 @@ int processMultibulkBuffer(client *c) {
         if (c->bulklen == -1) {
             newline = strchr(c->querybuf+pos,'\r');
             if (newline == NULL) {
-                if (sdslen(c->querybuf) > DISCNT_INLINE_MAX_SIZE) {
+                if (sdslen(c->querybuf) > PROTO_INLINE_MAX_SIZE) {
                     addReplyError(c,
                         "Protocol error: too big bulk count string");
                     setProtocolError(c,0);
-                    return DISCNT_ERR;
+                    return C_ERR;
                 }
                 break;
             }
@@ -933,18 +932,18 @@ int processMultibulkBuffer(client *c) {
                     "Protocol error: expected '$', got '%c'",
                     c->querybuf[pos]);
                 setProtocolError(c,pos);
-                return DISCNT_ERR;
+                return C_ERR;
             }
 
             ok = string2ll(c->querybuf+pos+1,newline-(c->querybuf+pos+1),&ll);
             if (!ok || ll < 0 || ll > 512*1024*1024) {
                 addReplyError(c,"Protocol error: invalid bulk length");
                 setProtocolError(c,pos);
-                return DISCNT_ERR;
+                return C_ERR;
             }
 
             pos += newline-(c->querybuf+pos)+2;
-            if (ll >= DISCNT_MBULK_BIG_ARG) {
+            if (ll >= PROTO_MBULK_BIG_ARG) {
                 size_t qblen;
 
                 /* If we are going to read a large object from network
@@ -971,10 +970,10 @@ int processMultibulkBuffer(client *c) {
              * instead of creating a new object by *copying* the sds we
              * just use the current sds string. */
             if (pos == 0 &&
-                c->bulklen >= DISCNT_MBULK_BIG_ARG &&
+                c->bulklen >= PROTO_MBULK_BIG_ARG &&
                 (signed) sdslen(c->querybuf) == c->bulklen+2)
             {
-                c->argv[c->argc++] = createObject(DISCNT_STRING,c->querybuf);
+                c->argv[c->argc++] = createObject(OBJ_STRING,c->querybuf);
                 sdsIncrLen(c->querybuf,-2); /* remove CRLF */
                 c->querybuf = sdsempty();
                 /* Assume that if we saw a fat argument we'll see another one
@@ -995,10 +994,10 @@ int processMultibulkBuffer(client *c) {
     if (pos) sdsrange(c->querybuf,pos,-1);
 
     /* We're done when c->multibulk == 0 */
-    if (c->multibulklen == 0) return DISCNT_OK;
+    if (c->multibulklen == 0) return C_OK;
 
     /* Still not read to process the command */
-    return DISCNT_ERR;
+    return C_ERR;
 }
 
 void processInputBuffer(client *c) {
@@ -1009,26 +1008,26 @@ void processInputBuffer(client *c) {
         if (clientsArePaused()) break;
 
         /* Immediately abort if the client is in the middle of something. */
-        if (c->flags & DISCNT_BLOCKED) break;
+        if (c->flags & CLIENT_BLOCKED) break;
 
-        /* DISCNT_CLOSE_AFTER_REPLY closes the connection once the reply is
+        /* CLIENT_CLOSE_AFTER_REPLY closes the connection once the reply is
          * written to the client. Make sure to not let the reply grow after
          * this flag has been set (i.e. don't process more commands). */
-        if (c->flags & DISCNT_CLOSE_AFTER_REPLY) break;
+        if (c->flags & CLIENT_CLOSE_AFTER_REPLY) break;
 
         /* Determine request type when unknown. */
         if (!c->reqtype) {
             if (c->querybuf[0] == '*') {
-                c->reqtype = DISCNT_REQ_MULTIBULK;
+                c->reqtype = PROTO_REQ_MULTIBULK;
             } else {
-                c->reqtype = DISCNT_REQ_INLINE;
+                c->reqtype = PROTO_REQ_INLINE;
             }
         }
 
-        if (c->reqtype == DISCNT_REQ_INLINE) {
-            if (processInlineBuffer(c) != DISCNT_OK) break;
-        } else if (c->reqtype == DISCNT_REQ_MULTIBULK) {
-            if (processMultibulkBuffer(c) != DISCNT_OK) break;
+        if (c->reqtype == PROTO_REQ_INLINE) {
+            if (processInlineBuffer(c) != C_OK) break;
+        } else if (c->reqtype == PROTO_REQ_MULTIBULK) {
+            if (processMultibulkBuffer(c) != C_OK) break;
         } else {
             serverPanic("Unknown request type");
         }
@@ -1038,7 +1037,7 @@ void processInputBuffer(client *c) {
             resetClient(c);
         } else {
             /* Only reset the client when the command was executed. */
-            if (processCommand(c) == DISCNT_OK)
+            if (processCommand(c) == C_OK)
                 resetClient(c);
         }
     }
@@ -1049,18 +1048,18 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     client *c = (client*) privdata;
     int nread, readlen;
     size_t qblen;
-    DISCNT_NOTUSED(el);
-    DISCNT_NOTUSED(mask);
+    UNUSED(el);
+    UNUSED(mask);
 
-    readlen = DISCNT_IOBUF_LEN;
+    readlen = PROTO_IOBUF_LEN;
     /* If this is a multi bulk request, and we are processing a bulk reply
      * that is large enough, try to maximize the probability that the query
      * buffer contains exactly the SDS string representing the object, even
      * at the risk of requiring more read(2) calls. This way the function
      * processMultiBulkBuffer() can avoid copying buffers to create the
-     * Discnt Object representing the argument. */
-    if (c->reqtype == DISCNT_REQ_MULTIBULK && c->multibulklen && c->bulklen != -1
-        && c->bulklen >= DISCNT_MBULK_BIG_ARG)
+     * Disque Object representing the argument. */
+    if (c->reqtype == PROTO_REQ_MULTIBULK && c->multibulklen && c->bulklen != -1
+        && c->bulklen >= PROTO_MBULK_BIG_ARG)
     {
         int remaining = (unsigned)(c->bulklen+2)-sdslen(c->querybuf);
 
@@ -1130,32 +1129,32 @@ void formatPeerId(char *peerid, size_t peerid_len, char *ip, int port) {
         snprintf(peerid,peerid_len,"%s:%d",ip,port);
 }
 
-/* A Discnt "Peer ID" is a colon separated ip:port pair.
+/* A Disque "Peer ID" is a colon separated ip:port pair.
  * For IPv4 it's in the form x.y.z.k:port, example: "127.0.0.1:1234".
  e For IPv6 addresses we use [] around the IP part, like in "[::1]:1234".
- * For Unix sockets we use path:0, like in "/tmp/discnt:0".
+ * For Unix sockets we use path:0, like in "/tmp/disque:0".
  *
- * A Peer ID always fits inside a buffer of DISCNT_PEER_ID_LEN bytes, including
+ * A Peer ID always fits inside a buffer of NET_PEER_ID_LEN bytes, including
  * the null term.
  *
- * The function returns DISCNT_OK on succcess, and DISCNT_ERR on failure.
+ * The function returns C_OK on succcess, and C_ERR on failure.
  *
  * On failure the function still populates 'peerid' with the "?:0" string
  * in case you want to relax error checking or need to display something
  * anyway (see anetPeerToString implementation for more info). */
 int genClientPeerId(client *client, char *peerid, size_t peerid_len) {
-    char ip[DISCNT_IP_STR_LEN];
+    char ip[NET_IP_STR_LEN];
     int port;
 
-    if (client->flags & DISCNT_UNIX_SOCKET) {
+    if (client->flags & CLIENT_UNIX_SOCKET) {
         /* Unix socket client. */
         snprintf(peerid,peerid_len,"%s:0",server.unixsocket);
-        return DISCNT_OK;
+        return C_OK;
     } else {
         /* TCP client. */
         int retval = anetPeerToString(client->fd,ip,sizeof(ip),&port);
         formatPeerId(peerid,peerid_len,ip,port);
-        return (retval == -1) ? DISCNT_ERR : DISCNT_OK;
+        return (retval == -1) ? C_ERR : C_OK;
     }
 }
 
@@ -1164,7 +1163,7 @@ int genClientPeerId(client *client, char *peerid, size_t peerid_len) {
  * The Peer ID never changes during the life of the client, however it
  * is expensive to compute. */
 char *getClientPeerId(client *c) {
-    char peerid[DISCNT_PEER_ID_LEN];
+    char peerid[NET_PEER_ID_LEN];
 
     if (c->peerid == NULL) {
         genClientPeerId(c,peerid,sizeof(peerid));
@@ -1180,13 +1179,12 @@ sds catClientInfoString(sds s, client *client) {
     int emask;
 
     p = flags;
-    if (client->flags & DISCNT_MONITOR) *p++ = 'O';
-    if (client->flags & DISCNT_BLOCKED) *p++ = 'b';
-    if (client->flags & DISCNT_CLOSE_AFTER_REPLY) *p++ = 'c';
-    if (client->flags & DISCNT_UNBLOCKED) *p++ = 'u';
-    if (client->flags & DISCNT_CLOSE_ASAP) *p++ = 'A';
-    if (client->flags & DISCNT_UNIX_SOCKET) *p++ = 'U';
-    if (client->flags & DISCNT_READONLY) *p++ = 'r';
+    if (client->flags & CLIENT_MONITOR) *p++ = 'O';
+    if (client->flags & CLIENT_BLOCKED) *p++ = 'b';
+    if (client->flags & CLIENT_CLOSE_AFTER_REPLY) *p++ = 'c';
+    if (client->flags & CLIENT_UNBLOCKED) *p++ = 'u';
+    if (client->flags & CLIENT_CLOSE_ASAP) *p++ = 'A';
+    if (client->flags & CLIENT_UNIX_SOCKET) *p++ = 'U';
     if (p == flags) *p++ = 'N';
     *p++ = '\0';
 
@@ -1263,7 +1261,7 @@ void clientCommand(client *c) {
                     long long tmp;
 
                     if (getLongLongFromObjectOrReply(c,c->argv[i+1],&tmp,NULL)
-                        != DISCNT_OK) return;
+                        != C_OK) return;
                     id = tmp;
                 } else if (!strcasecmp(c->argv[i]->ptr,"type") && moreargs) {
                     type = getClientTypeByName(c->argv[i+1]->ptr);
@@ -1325,7 +1323,7 @@ void clientCommand(client *c) {
 
         /* If this client has to be closed, flag it as CLOSE_AFTER_REPLY
          * only after we queued the reply to its output buffers. */
-        if (close_this_client) c->flags |= DISCNT_CLOSE_AFTER_REPLY;
+        if (close_this_client) c->flags |= CLIENT_CLOSE_AFTER_REPLY;
     } else if (!strcasecmp(c->argv[1]->ptr,"setname") && c->argc == 3) {
         int j, len = sdslen(c->argv[2]->ptr);
         char *p = c->argv[2]->ptr;
@@ -1363,7 +1361,7 @@ void clientCommand(client *c) {
         long long duration;
 
         if (getTimeoutFromObjectOrReply(c,c->argv[2],&duration,UNIT_MILLISECONDS)
-                                        != DISCNT_OK) return;
+                                        != C_OK) return;
         pauseClients(duration);
         addReply(c,shared.ok);
     } else {
@@ -1419,7 +1417,7 @@ void rewriteClientCommandArgument(client *c, int i, robj *newval) {
     }
 }
 
-/* This function returns the number of bytes that Discnt is virtually
+/* This function returns the number of bytes that Disque is virtually
  * using to store the reply still not read by the client.
  * It is "virtual" since the reply output list may contain objects that
  * are shared and are not really using additional memory.
@@ -1442,21 +1440,21 @@ unsigned long getClientOutputBufferMemoryUsage(client *c) {
  * classes of clients.
  *
  * The function will return one of the following:
- * DISCNT_CLIENT_TYPE_NORMAL -> Normal client
+ * CLIENT_TYPE_NORMAL -> Normal client
  */
 int getClientType(client *c) {
-    DISCNT_NOTUSED(c);
-    return DISCNT_CLIENT_TYPE_NORMAL;
+    UNUSED(c);
+    return CLIENT_TYPE_NORMAL;
 }
 
 int getClientTypeByName(char *name) {
-    if (!strcasecmp(name,"normal")) return DISCNT_CLIENT_TYPE_NORMAL;
+    if (!strcasecmp(name,"normal")) return CLIENT_TYPE_NORMAL;
     else return -1;
 }
 
 char *getClientTypeName(int class) {
     switch(class) {
-    case DISCNT_CLIENT_TYPE_NORMAL: return "normal";
+    case CLIENT_TYPE_NORMAL: return "normal";
     default:                        return NULL;
     }
 }
@@ -1503,14 +1501,14 @@ int checkClientOutputBufferLimits(client *c) {
 
 /* Asynchronously close a client if soft or hard limit is reached on the
  * output buffer size. The caller can check if the client will be closed
- * checking if the client DISCNT_CLOSE_ASAP flag is set.
+ * checking if the client CLIENT_CLOSE_ASAP flag is set.
  *
  * Note: we need to close the client asynchronously because this function is
  * called from contexts where the client can't be freed safely, i.e. from the
  * lower level functions pushing data inside the client output buffers. */
 void asyncCloseClientOnOutputBufferLimitReached(client *c) {
     serverAssert(c->reply_bytes < ULONG_MAX-(1024*64));
-    if (c->reply_bytes == 0 || c->flags & DISCNT_CLOSE_ASAP) return;
+    if (c->reply_bytes == 0 || c->flags & CLIENT_CLOSE_ASAP) return;
     if (checkClientOutputBufferLimits(c)) {
         sds client = catClientInfoString(sdsempty(),c);
 
@@ -1529,7 +1527,7 @@ void asyncCloseClientOnOutputBufferLimitReached(client *c) {
  * required that slaves process the latest bytes from the replication stream
  * before being turned to masters.
  *
- * This function is also internally used by Discnt Cluster for the manual
+ * This function is also internally used by Disque Cluster for the manual
  * failover procedure implemented by CLUSTER FAILOVER.
  *
  * The function always succeed, even if there is already a pause in progress.
@@ -1564,7 +1562,7 @@ int clientsArePaused(void) {
     return server.clients_paused;
 }
 
-/* This function is called by Discnt in order to process a few events from
+/* This function is called by Disque in order to process a few events from
  * time to time while blocked into some not interruptible operation.
  * This allows to reply to clients with the -LOADING error while loading the
  * data set at startup or after a full resynchronization with the master

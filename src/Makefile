@@ -112,7 +112,7 @@ QUIET_INSTALL = @printf '    %b %b\n' $(LINKCOLOR)INSTALL$(ENDCOLOR) $(BINCOLOR)
 endif
 
 DISCNT_SERVER_NAME=discnt-server
-DISCNT_SERVER_OBJ=adlist.o ae.o anet.o dict.o discnt.o sds.o zmalloc.o lzf_c.o lzf_d.o sha1.o release.o networking.o util.o object.o config.o debug.o syncio.o cluster.o crc16.o endianconv.o bio.o memtest.o crc64.o setproctitle.o blocked.o latency.o sparkline.o counter.o skiplist.o ddb.o rio.o
+DISCNT_SERVER_OBJ=adlist.o ae.o anet.o dict.o server.o sds.o zmalloc.o lzf_c.o lzf_d.o sha1.o release.o networking.o util.o object.o config.o debug.o syncio.o cluster.o endianconv.o bio.o memtest.o crc64.o setproctitle.o blocked.o latency.o sparkline.o counter.o ddb.o rio.o
 DISCNT_CLI_NAME=discnt-cli
 DISCNT_CLI_OBJ=anet.o sds.o adlist.o discnt-cli.o zmalloc.o release.o anet.o ae.o crc64.o
 DISCNT_BENCHMARK_NAME=discnt-benchmark
@@ -163,7 +163,7 @@ endif
 
 # discnt-server
 $(DISCNT_SERVER_NAME): $(DISCNT_SERVER_OBJ)
-	$(DISCNT_LD) -o $@ $^ ../deps/hiredis/libhiredis.a $(FINAL_LIBS)
+	$(DISCNT_LD) -o $@ $^ $(FINAL_LIBS)
 
 # discnt-cli
 $(DISCNT_CLI_NAME): $(DISCNT_CLI_OBJ)

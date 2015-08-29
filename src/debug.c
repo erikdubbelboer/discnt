@@ -27,7 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "discnt.h"
+#include "server.h"
 #include "sha1.h"   /* SHA1 is used for DEBUG DIGEST */
 #include "crc64.h"
 #include "counter.h"
@@ -141,12 +141,12 @@ void debugCommand(client *c) {
         if (c->argc >= 3) c->argv[2] = tryObjectEncoding(c->argv[2]);
         serverAssertWithInfo(c,c->argv[0],1 == 2);
     } else if (!strcasecmp(c->argv[1]->ptr,"reload")) {
-        if (ddbSave(server.ddb_filename) != DISCNT_OK) {
+        if (ddbSave(server.ddb_filename) != C_OK) {
             addReply(c,shared.err);
             return;
         }
         dictEmpty(server.counters, NULL);
-        if (ddbLoad(server.ddb_filename) != DISCNT_OK) {
+        if (ddbLoad(server.ddb_filename) != C_OK) {
             addReplyError(c,"Error trying to load the DDB dump");
             return;
         }
@@ -183,9 +183,16 @@ void debugCommand(client *c) {
         addReplySds(c,errstr);
     } else if (!strcasecmp(c->argv[1]->ptr,"structsize") && c->argc == 2) {
         sds sizes = sdsempty();
-        sizes = sdscatprintf(sizes,"bits:%d ", (sizeof(void*) == 8)?64:32);
+        sizes = sdscatprintf(sizes,"bits:%d ",(sizeof(void*) == 8)?64:32);
         sizes = sdscatprintf(sizes,"counter:%d ", (int)sizeof(counter));
-        sizes = sdscatprintf(sizes,"sdshdr:%d", (int)sizeof(struct sdshdr));
+        sizes = sdscatprintf(sizes,"shard:%d ", (int)sizeof(shard));
+        sizes = sdscatprintf(sizes,"robj:%d ",(int)sizeof(robj));
+        sizes = sdscatprintf(sizes,"dictentry:%d ",(int)sizeof(dictEntry));
+        sizes = sdscatprintf(sizes,"sdshdr5:%d ",(int)sizeof(struct sdshdr5));
+        sizes = sdscatprintf(sizes,"sdshdr8:%d ",(int)sizeof(struct sdshdr8));
+        sizes = sdscatprintf(sizes,"sdshdr16:%d ",(int)sizeof(struct sdshdr16));
+        sizes = sdscatprintf(sizes,"sdshdr32:%d ",(int)sizeof(struct sdshdr32));
+        sizes = sdscatprintf(sizes,"sdshdr64:%d ",(int)sizeof(struct sdshdr64));
         addReplyBulkSds(c,sizes);
     } else if (!strcasecmp(c->argv[1]->ptr,"counter") && c->argc == 3) {
         int i;
@@ -211,7 +218,7 @@ void debugCommand(client *c) {
         while ((ln = listNext(&li)) != NULL) {
             shard *shrd = listNodeValue(ln);
 
-            memcpy(&buf[5], shrd->node_name, DISCNT_CLUSTER_NAMELEN);
+            memcpy(&buf[5], shrd->node_name, CLUSTER_NAMELEN);
 
             addReplyMultiBulkLen(c,5);
             addReplyString(c, buf, 5+40+2);
@@ -285,7 +292,7 @@ void _serverAssertPrintClientInfo(client *c) {
         char buf[128];
         char *arg;
 
-        if (c->argv[j]->type == DISCNT_STRING && sdsEncodedObject(c->argv[j])) {
+        if (c->argv[j]->type == OBJ_STRING && sdsEncodedObject(c->argv[j])) {
             arg = (char*) c->argv[j]->ptr;
         } else {
             snprintf(buf,sizeof(buf),"Object type: %d, encoding: %d",
@@ -307,7 +314,7 @@ void serverLogObjectDebugInfo(robj *o) {
     serverLog(LL_WARNING,"Object type: %d", o->type);
     serverLog(LL_WARNING,"Object encoding: %d", o->encoding);
     serverLog(LL_WARNING,"Object refcount: %d", o->refcount);
-    if (o->type == DISCNT_STRING && sdsEncodedObject(o)) {
+    if (o->type == OBJ_STRING && sdsEncodedObject(o)) {
         serverLog(LL_WARNING,"Object raw string len: %zu", sdslen(o->ptr));
         if (sdslen(o->ptr) < 4096) {
             sds repr = sdscatrepr(sdsempty(),o->ptr,sdslen(o->ptr));
@@ -654,7 +661,7 @@ void sigsegvHandler(int sig, siginfo_t *info, void *secret) {
     ucontext_t *uc = (ucontext_t*) secret;
     sds infostring, clients;
     struct sigaction act;
-    DISCNT_NOTUSED(info);
+    UNUSED(info);
 
     bugReportStart();
     serverLog(LL_WARNING,
@@ -734,11 +741,11 @@ void serverLogHexDump(int level, char *descr, void *value, size_t len) {
         len--;
         v++;
         if (b-buf == 64 || len == 0) {
-            serverLogRaw(level|DISCNT_LOG_RAW,buf);
+            serverLogRaw(level|LL_RAW,buf);
             b = buf;
         }
     }
-    serverLogRaw(level|DISCNT_LOG_RAW,"\n");
+    serverLogRaw(level|LL_RAW,"\n");
 }
 
 /* =========================== Software Watchdog ============================ */
@@ -748,8 +755,8 @@ void watchdogSignalHandler(int sig, siginfo_t *info, void *secret) {
 #ifdef HAVE_BACKTRACE
     ucontext_t *uc = (ucontext_t*) secret;
 #endif
-    DISCNT_NOTUSED(info);
-    DISCNT_NOTUSED(sig);
+    UNUSED(info);
+    UNUSED(sig);
 
     serverLogFromHandler(LL_WARNING,"\n--- WATCHDOG TIMER EXPIRED ---");
 #ifdef HAVE_BACKTRACE

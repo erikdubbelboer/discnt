@@ -1,5 +1,7 @@
-/*
- * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
+/* SDSLib 2.0 -- A C dynamic strings library
+ *
+ * Copyright (c) 2006-2015, Salvatore Sanfilippo <antirez at gmail dot com>
+ * Copyright (c) 2015, Redis Labs, Inc
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -10,7 +12,7 @@
  *   * Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Disque nor the names of its contributors may be used
+ *   * Neither the name of Redis nor the names of its contributors may be used
  *     to endorse or promote products derived from this software without
  *     specific prior written permission.
  *
@@ -27,22 +29,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __DISQUE_UTIL_H
-#define __DISQUE_UTIL_H
+/* SDS allocator selection.
+ *
+ * This file is used in order to change the SDS allocator at compile time.
+ * Just define the following defines to what you want to use. Also add
+ * the include of your alternate allocator if needed (not needed in order
+ * to use the default libc allocator). */
 
-#include <stdint.h>
-#include "sds.h"
-
-int stringmatchlen(const char *p, int plen, const char *s, int slen, int nocase);
-int stringmatch(const char *p, const char *s, int nocase);
-long long memtoll(const char *p, int *err);
-uint32_t digits10(uint64_t v);
-uint32_t sdigits10(int64_t v);
-int ll2string(char *s, size_t len, long long value);
-int string2ll(const char *s, size_t slen, long long *value);
-int string2l(const char *s, size_t slen, long *value);
-int d2string(char *buf, size_t len, double value);
-sds getAbsolutePath(char *filename);
-int pathIsBaseName(char *path);
-
-#endif
+#include "zmalloc.h"
+#define s_malloc zmalloc
+#define s_realloc zrealloc
+#define s_free zfree

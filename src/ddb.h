@@ -34,11 +34,11 @@
 #include "rio.h"
 
 /* TBD: include only necessary headers. */
-#include "discnt.h"
+#include "server.h"
 
 /* The current DDB version. When the format changes in a way that is no longer
  * backward compatible this number gets incremented. */
-#define DDB_VERSION 7
+#define DDB_VERSION 1
 
 #define DDB_LENERR UINT_MAX
 

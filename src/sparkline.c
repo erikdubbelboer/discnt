@@ -5,7 +5,7 @@
  *
  * ---------------------------------------------------------------------------
  *
- * Copyright(C) 2011-2015 Salvatore Sanfilippo <antirez@gmail.com>
+ * Copyright(C) 2011-2014 Salvatore Sanfilippo <antirez@gmail.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,7 +30,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "discnt.h"
+#include "server.h"
 
 #include <math.h>
 

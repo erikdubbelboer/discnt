@@ -27,7 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "discnt.h"
+#include "server.h"
 #include "cluster.h"
 #include "bio.h"
 
@@ -141,7 +141,7 @@ void serverLogRaw(int level, const char *msg) {
     const char *c = ".-*#";
     FILE *fp;
     char buf[64];
-    int rawmode = (level & DISCNT_LOG_RAW);
+    int rawmode = (level & LL_RAW);
     int log_to_stdout = server.logfile[0] == '\0';
 
     level &= 0xff; /* clear flags */
@@ -180,7 +180,7 @@ void serverLogRaw(int level, const char *msg) {
  * the INFO output on crash. */
 void serverLog(int level, const char *fmt, ...) {
     va_list ap;
-    char msg[DISCNT_MAX_LOGMSG_LEN];
+    char msg[LOG_MAX_LEN];
 
     if ((level&0xff) < server.verbosity) return;
 
@@ -335,8 +335,8 @@ int dictEncObjKeyCompare(void *privdata, const void *key1,
     robj *o1 = (robj*) key1, *o2 = (robj*) key2;
     int cmp;
 
-    if (o1->encoding == DISCNT_ENCODING_INT &&
-        o2->encoding == DISCNT_ENCODING_INT)
+    if (o1->encoding == OBJ_ENCODING_INT &&
+        o2->encoding == OBJ_ENCODING_INT)
             return o1->ptr == o2->ptr;
 
     o1 = getDecodedObject(o1);
@@ -353,7 +353,7 @@ unsigned int dictEncObjHash(const void *key) {
     if (sdsEncodedObject(o)) {
         return dictGenHashFunction(o->ptr, sdslen((sds)o->ptr));
     } else {
-        if (o->encoding == DISCNT_ENCODING_INT) {
+        if (o->encoding == OBJ_ENCODING_INT) {
             char buf[32];
             int len;
 
@@ -393,14 +393,14 @@ dictType commandTableDictType = {
 /* Cluster nodes hash table, mapping nodes addresses 1.2.3.4:5262 to
  * clusterNode structures. */
 unsigned int dictClusterNodeHash(const void *key) {
-    return dictGenHashFunction(key,DISCNT_CLUSTER_NAMELEN);
+    return dictGenHashFunction(key,CLUSTER_NAMELEN);
 }
 
 int dictClusterNodeKeyCompare(void *privdata, const void *key1,
                       const void *key2)
 {
     DICT_NOTUSED(privdata);
-    return memcmp(key1, key2, DISCNT_CLUSTER_NAMELEN) == 0;
+    return memcmp(key1, key2, CLUSTER_NAMELEN) == 0;
 }
 
 dictType clusterNodesDictType = {
@@ -440,7 +440,7 @@ int htNeedsResize(dict *dict) {
     size = dictSlots(dict);
     used = dictSize(dict);
     return (size && used && size > DICT_HT_INITIAL_SIZE &&
-            (used*100/size < DISCNT_HT_MINFILL));
+            (used*100/size < HASHTABLE_MIN_FILL));
 }
 
 void tryResizeHashTables(void) {
@@ -455,14 +455,12 @@ void tryResizeHashTables(void) {
  * The function returns 1 if some rehashing was performed, otherwise 0
  * is returned. */
 int incrementallyRehash(void) {
-    int workdone = 0;
-
     if (dictIsRehashing(server.counters)) {
         dictRehashMilliseconds(server.counters,1);
-        workdone = 1;
+        return 1;
     }
 
-    return workdone;
+    return 0;
 }
 
 /* This function is called once a background process of some kind terminates,
@@ -498,7 +496,7 @@ void trackInstantaneousMetric(int metric, long long current_reading) {
     server.inst_metric[metric].samples[server.inst_metric[metric].idx] =
         ops_sec;
     server.inst_metric[metric].idx++;
-    server.inst_metric[metric].idx %= DISCNT_METRIC_SAMPLES;
+    server.inst_metric[metric].idx %= STAT_METRIC_SAMPLES;
     server.inst_metric[metric].last_sample_time = mstime();
     server.inst_metric[metric].last_sample_count = current_reading;
 }
@@ -508,9 +506,9 @@ long long getInstantaneousMetric(int metric) {
     int j;
     long long sum = 0;
 
-    for (j = 0; j < DISCNT_METRIC_SAMPLES; j++)
+    for (j = 0; j < STAT_METRIC_SAMPLES; j++)
         sum += server.inst_metric[metric].samples[j];
-    return sum / DISCNT_METRIC_SAMPLES;
+    return sum / STAT_METRIC_SAMPLES;
 }
 
 /* Check for timeouts. Returns non-zero if the client was terminated */
@@ -518,13 +516,13 @@ int clientsCronHandleTimeout(client *c) {
     time_t now = server.unixtime;
 
     if (server.maxidletime &&
-        !(c->flags & DISCNT_BLOCKED) &&  /* no timeout for blocked clients. */
+        !(c->flags & CLIENT_BLOCKED) &&  /* no timeout for blocked clients. */
         (now - c->lastinteraction > server.maxidletime))
     {
         serverLog(LL_VERBOSE,"Closing idle client");
         freeClient(c);
         return 1;
-    } else if (c->flags & DISCNT_BLOCKED) {
+    } else if (c->flags & CLIENT_BLOCKED) {
         /* Blocked OPS timeout is handled with milliseconds resolution.
          * However note that the actual resolution is limited by
          * server.hz. */
@@ -549,7 +547,7 @@ int clientsCronResizeQueryBuffer(client *c) {
     /* There are two conditions to resize the query buffer:
      * 1) Query buffer is > BIG_ARG and too big for latest peak.
      * 2) Client is inactive and the buffer is bigger than 1k. */
-    if (((querybuf_size > DISCNT_MBULK_BIG_ARG) &&
+    if (((querybuf_size > PROTO_MBULK_BIG_ARG) &&
          (querybuf_size/(c->querybuf_peak+1)) > 2) ||
          (querybuf_size > 1024 && idletime > 2))
     {
@@ -638,9 +636,9 @@ void updateCachedTime(void) {
  */
 
 int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
-    DISCNT_NOTUSED(eventLoop);
-    DISCNT_NOTUSED(id);
-    DISCNT_NOTUSED(clientData);
+    UNUSED(eventLoop);
+    UNUSED(id);
+    UNUSED(clientData);
     int j;
 
     /* Software watchdog: deliver the SIGALRM that will reach the signal
@@ -651,10 +649,10 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     updateCachedTime();
 
     run_with_period(100) {
-        trackInstantaneousMetric(DISCNT_METRIC_COMMAND,server.stat_numcommands);
-        trackInstantaneousMetric(DISCNT_METRIC_NET_INPUT,
+        trackInstantaneousMetric(STAT_METRIC_COMMAND,server.stat_numcommands);
+        trackInstantaneousMetric(STAT_METRIC_NET_INPUT,
                 server.stat_net_input_bytes);
-        trackInstantaneousMetric(DISCNT_METRIC_NET_OUTPUT,
+        trackInstantaneousMetric(STAT_METRIC_NET_OUTPUT,
                 server.stat_net_output_bytes);
     }
 
@@ -668,7 +666,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     /* We received a SIGTERM, shutting down here in a safe way, as it is
      * not ok doing so inside the signal handler. */
     if (server.shutdown_asap) {
-        if (prepareForShutdown(SHUTDOWN_NOFLAGS) == DISCNT_OK) exit(0);
+        if (prepareForShutdown(SHUTDOWN_NOFLAGS) == C_OK) exit(0);
         serverLog(LL_WARNING,"SIGTERM received but errors trying to shut down the server, check the logs for more information");
         server.shutdown_asap = 0;
     }
@@ -726,12 +724,12 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
             /* Save if we reached the given amount of changes,
              * the given amount of seconds, and if the latest bgsave was
              * successful or if, in case of an error, at least
-             * DISCNT_BGSAVE_RETRY_DELAY seconds already elapsed. */
+             * CONFIG_BGSAVE_RETRY_DELAY seconds already elapsed. */
             if (server.dirty >= sp->changes &&
                 server.unixtime-server.lastsave > sp->seconds &&
                 (server.unixtime-server.lastbgsave_try >
-                 DISCNT_BGSAVE_RETRY_DELAY ||
-                 server.lastbgsave_status == DISCNT_OK))
+                 CONFIG_BGSAVE_RETRY_DELAY ||
+                 server.lastbgsave_status == C_OK))
             {
                 serverLog(LL_NOTICE,"%lld changes in %d seconds. Saving...",
                     server.dirty, (int)sp->seconds);
@@ -760,14 +758,16 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
  * main loop of the event driven library, that is, before to sleep
  * for ready file descriptors. */
 void beforeSleep(struct aeEventLoop *eventLoop) {
-    DISCNT_NOTUSED(eventLoop);
+    UNUSED(eventLoop);
+
+    /* Call the Cluster before sleep function. Note that this function
+     * may change the state of Cluster, so it's a good idea to call it
+     * before serving the unblocked clients later in this function. */
+    clusterBeforeSleep();
 
     /* Try to process pending commands for clients that were just unblocked. */
     if (listLength(server.unblocked_clients))
         processUnblockedClients();
-
-    /* Call the Discnt Cluster before sleep function. */
-    clusterBeforeSleep();
 }
 
 /* =========================== Server initialization ======================== */
@@ -775,67 +775,67 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
 void createSharedObjects(void) {
     int j;
 
-    shared.crlf = createObject(DISCNT_STRING,sdsnew("\r\n"));
-    shared.ok = createObject(DISCNT_STRING,sdsnew("+OK\r\n"));
-    shared.err = createObject(DISCNT_STRING,sdsnew("-ERR\r\n"));
-    shared.emptybulk = createObject(DISCNT_STRING,sdsnew("$0\r\n\r\n"));
-    shared.czero = createObject(DISCNT_STRING,sdsnew(":0\r\n"));
-    shared.cone = createObject(DISCNT_STRING,sdsnew(":1\r\n"));
-    shared.cnegone = createObject(DISCNT_STRING,sdsnew(":-1\r\n"));
-    shared.nullbulk = createObject(DISCNT_STRING,sdsnew("$-1\r\n"));
-    shared.nullmultibulk = createObject(DISCNT_STRING,sdsnew("*-1\r\n"));
-    shared.emptymultibulk = createObject(DISCNT_STRING,sdsnew("*0\r\n"));
-    shared.pong = createObject(DISCNT_STRING,sdsnew("+PONG\r\n"));
-    shared.queued = createObject(DISCNT_STRING,sdsnew("+QUEUED\r\n"));
-    shared.wrongtypeerr = createObject(DISCNT_STRING,sdsnew(
+    shared.crlf = createObject(OBJ_STRING,sdsnew("\r\n"));
+    shared.ok = createObject(OBJ_STRING,sdsnew("+OK\r\n"));
+    shared.err = createObject(OBJ_STRING,sdsnew("-ERR\r\n"));
+    shared.emptybulk = createObject(OBJ_STRING,sdsnew("$0\r\n\r\n"));
+    shared.czero = createObject(OBJ_STRING,sdsnew(":0\r\n"));
+    shared.cone = createObject(OBJ_STRING,sdsnew(":1\r\n"));
+    shared.cnegone = createObject(OBJ_STRING,sdsnew(":-1\r\n"));
+    shared.nullbulk = createObject(OBJ_STRING,sdsnew("$-1\r\n"));
+    shared.nullmultibulk = createObject(OBJ_STRING,sdsnew("*-1\r\n"));
+    shared.emptymultibulk = createObject(OBJ_STRING,sdsnew("*0\r\n"));
+    shared.pong = createObject(OBJ_STRING,sdsnew("+PONG\r\n"));
+    shared.queued = createObject(OBJ_STRING,sdsnew("+QUEUED\r\n"));
+    shared.wrongtypeerr = createObject(OBJ_STRING,sdsnew(
         "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"));
-    shared.nokeyerr = createObject(DISCNT_STRING,sdsnew(
+    shared.nokeyerr = createObject(OBJ_STRING,sdsnew(
         "-ERR no such key\r\n"));
-    shared.syntaxerr = createObject(DISCNT_STRING,sdsnew(
+    shared.syntaxerr = createObject(OBJ_STRING,sdsnew(
         "-ERR syntax error\r\n"));
-    shared.sameobjecterr = createObject(DISCNT_STRING,sdsnew(
+    shared.sameobjecterr = createObject(OBJ_STRING,sdsnew(
         "-ERR source and destination objects are the same\r\n"));
-    shared.outofrangeerr = createObject(DISCNT_STRING,sdsnew(
+    shared.outofrangeerr = createObject(OBJ_STRING,sdsnew(
         "-ERR index out of range\r\n"));
-    shared.noscripterr = createObject(DISCNT_STRING,sdsnew(
+    shared.noscripterr = createObject(OBJ_STRING,sdsnew(
         "-NOSCRIPT No matching script. Please use EVAL.\r\n"));
-    shared.loadingerr = createObject(DISCNT_STRING,sdsnew(
+    shared.loadingerr = createObject(OBJ_STRING,sdsnew(
         "-LOADING Discnt is loading the dataset in memory\r\n"));
-    shared.slowscripterr = createObject(DISCNT_STRING,sdsnew(
+    shared.slowscripterr = createObject(OBJ_STRING,sdsnew(
         "-BUSY Discnt is busy running a script. You can only call SCRIPT KILL or SHUTDOWN NOSAVE.\r\n"));
-    shared.masterdownerr = createObject(DISCNT_STRING,sdsnew(
+    shared.masterdownerr = createObject(OBJ_STRING,sdsnew(
         "-MASTERDOWN Link with MASTER is down and slave-serve-stale-data is set to 'no'.\r\n"));
-    shared.bgsaveerr = createObject(DISCNT_STRING,sdsnew(
+    shared.bgsaveerr = createObject(OBJ_STRING,sdsnew(
         "-MISCONF Discnt is configured to save DDB snapshots, but is currently not able to persist on disk. Commands that may modify the data set are disabled. Please check Discnt logs for details about the error.\r\n"));
-    shared.roslaveerr = createObject(DISCNT_STRING,sdsnew(
+    shared.roslaveerr = createObject(OBJ_STRING,sdsnew(
         "-READONLY You can't write against a read only slave.\r\n"));
-    shared.noautherr = createObject(DISCNT_STRING,sdsnew(
+    shared.noautherr = createObject(OBJ_STRING,sdsnew(
         "-NOAUTH Authentication required.\r\n"));
-    shared.oomerr = createObject(DISCNT_STRING,sdsnew(
+    shared.oomerr = createObject(OBJ_STRING,sdsnew(
         "-OOM command not allowed when used memory > 'maxmemory'.\r\n"));
-    shared.execaborterr = createObject(DISCNT_STRING,sdsnew(
+    shared.execaborterr = createObject(OBJ_STRING,sdsnew(
         "-EXECABORT Transaction discarded because of previous errors.\r\n"));
-    shared.noreplicaserr = createObject(DISCNT_STRING,sdsnew(
+    shared.noreplicaserr = createObject(OBJ_STRING,sdsnew(
         "-NOREPLICAS Not enough good slaves to write.\r\n"));
-    shared.busykeyerr = createObject(DISCNT_STRING,sdsnew(
+    shared.busykeyerr = createObject(OBJ_STRING,sdsnew(
         "-BUSYKEY Target key name already exists.\r\n"));
-    shared.space = createObject(DISCNT_STRING,sdsnew(" "));
-    shared.colon = createObject(DISCNT_STRING,sdsnew(":"));
-    shared.plus = createObject(DISCNT_STRING,sdsnew("+"));
+    shared.space = createObject(OBJ_STRING,sdsnew(" "));
+    shared.colon = createObject(OBJ_STRING,sdsnew(":"));
+    shared.plus = createObject(OBJ_STRING,sdsnew("+"));
     shared.messagebulk = createStringObject("$7\r\nmessage\r\n",13);
     shared.pmessagebulk = createStringObject("$8\r\npmessage\r\n",14);
     shared.subscribebulk = createStringObject("$9\r\nsubscribe\r\n",15);
     shared.unsubscribebulk = createStringObject("$11\r\nunsubscribe\r\n",18);
     shared.psubscribebulk = createStringObject("$10\r\npsubscribe\r\n",17);
     shared.punsubscribebulk = createStringObject("$12\r\npunsubscribe\r\n",19);
-    for (j = 0; j < DISCNT_SHARED_INTEGERS; j++) {
-        shared.integers[j] = createObject(DISCNT_STRING,(void*)(long)j);
-        shared.integers[j]->encoding = DISCNT_ENCODING_INT;
+    for (j = 0; j < OBJ_SHARED_INTEGERS; j++) {
+        shared.integers[j] = createObject(OBJ_STRING,(void*)(long)j);
+        shared.integers[j]->encoding = OBJ_ENCODING_INT;
     }
-    for (j = 0; j < DISCNT_SHARED_BULKHDR_LEN; j++) {
-        shared.mbulkhdr[j] = createObject(DISCNT_STRING,
+    for (j = 0; j < OBJ_SHARED_BULKHDR_LEN; j++) {
+        shared.mbulkhdr[j] = createObject(OBJ_STRING,
             sdscatprintf(sdsempty(),"*%d\r\n",j));
-        shared.bulkhdr[j] = createObject(DISCNT_STRING,
+        shared.bulkhdr[j] = createObject(OBJ_STRING,
             sdscatprintf(sdsempty(),"$%d\r\n",j));
     }
     /* The following two shared objects, minstring and maxstrings, are not
@@ -849,47 +849,46 @@ void createSharedObjects(void) {
 void initServerConfig(void) {
     int j;
 
-    getRandomHexChars(server.runid,DISCNT_RUN_ID_SIZE);
+    getRandomHexChars(server.runid,CONFIG_RUN_ID_SIZE);
     server.configfile = NULL;
-    server.hz = DISCNT_DEFAULT_HZ;
-    server.runid[DISCNT_RUN_ID_SIZE] = '\0';
+    server.hz = CONFIG_DEFAULT_HZ;
+    server.runid[CONFIG_RUN_ID_SIZE] = '\0';
     server.arch_bits = (sizeof(long) == 8) ? 64 : 32;
-    server.port = DISCNT_SERVERPORT;
-    server.tcp_backlog = DISCNT_TCP_BACKLOG;
+    server.port = CONFIG_DEFAULT_SERVER_PORT;
+    server.tcp_backlog = CONFIG_DEFAULT_TCP_BACKLOG;
     server.bindaddr_count = 0;
     server.unixsocket = NULL;
-    server.unixsocketperm = DISCNT_DEFAULT_UNIX_SOCKET_PERM;
+    server.unixsocketperm = CONFIG_DEFAULT_UNIX_SOCKET_PERM;
     server.ipfd_count = 0;
     server.sofd = -1;
-    server.dbnum = DISCNT_DEFAULT_DBNUM;
-    server.verbosity = DISCNT_DEFAULT_VERBOSITY;
-    server.maxidletime = DISCNT_MAXIDLETIME;
-    server.tcpkeepalive = DISCNT_DEFAULT_TCP_KEEPALIVE;
+    server.verbosity = CONFIG_DEFAULT_VERBOSITY;
+    server.maxidletime = CONFIG_DEFAULT_CLIENT_TIMEOUT;
+    server.tcpkeepalive = CONFIG_DEFAULT_TCP_KEEPALIVE;
     server.active_expire_enabled = 1;
-    server.client_max_querybuf_len = DISCNT_MAX_QUERYBUF_LEN;
+    server.client_max_querybuf_len = PROTO_MAX_QUERYBUF_LEN;
     server.saveparams = NULL;
     server.loading = 0;
-    server.logfile = zstrdup(DISCNT_DEFAULT_LOGFILE);
-    server.syslog_enabled = DISCNT_DEFAULT_SYSLOG_ENABLED;
-    server.syslog_ident = zstrdup(DISCNT_DEFAULT_SYSLOG_IDENT);
+    server.logfile = zstrdup(CONFIG_DEFAULT_LOGFILE);
+    server.syslog_enabled = CONFIG_DEFAULT_SYSLOG_ENABLED;
+    server.syslog_ident = zstrdup(CONFIG_DEFAULT_SYSLOG_IDENT);
     server.syslog_facility = LOG_LOCAL0;
-    server.daemonize = DISCNT_DEFAULT_DAEMONIZE;
-    server.pidfile = zstrdup(DISCNT_DEFAULT_PID_FILE);
-    server.ddb_filename = zstrdup(DISCNT_DEFAULT_DDB_FILENAME);
+    server.daemonize = CONFIG_DEFAULT_DAEMONIZE;
+    server.pidfile = zstrdup(CONFIG_DEFAULT_PID_FILE);
+    server.ddb_filename = zstrdup(CONFIG_DEFAULT_DDB_FILENAME);
     server.requirepass = NULL;
-    server.ddb_compression = DISCNT_DEFAULT_DDB_COMPRESSION;
-    server.ddb_checksum = DISCNT_DEFAULT_DDB_CHECKSUM;
-    server.stop_writes_on_bgsave_err = DISCNT_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR;
-    server.activerehashing = DISCNT_DEFAULT_ACTIVE_REHASHING;
-    server.maxclients = DISCNT_MAX_CLIENTS;
-    server.precision = DISCNT_PRECISION;
-    server.history_size = DISCNT_HISTORY;
+    server.ddb_compression = CONFIG_DEFAULT_DDB_COMPRESSION;
+    server.ddb_checksum = CONFIG_DEFAULT_DDB_CHECKSUM;
+    server.stop_writes_on_bgsave_err = CONFIG_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR;
+    server.activerehashing = CONFIG_DEFAULT_ACTIVE_REHASHING;
+    server.maxclients = CONFIG_DEFAULT_MAX_CLIENTS;
+    server.precision = CONFIG_PRECISION;
+    server.history_size = CONFIG_HISTORY;
     server.history_index = 0;
     server.bpop_blocked_clients = 0;
-    server.maxmemory = DISCNT_DEFAULT_MAXMEMORY;
+    server.maxmemory = CONFIG_DEFAULT_MAXMEMORY;
     server.shutdown_asap = 0;
-    server.cluster_node_timeout = DISCNT_CLUSTER_DEFAULT_NODE_TIMEOUT;
-    server.cluster_configfile = zstrdup(DISCNT_DEFAULT_CLUSTER_CONFIG_FILE);
+    server.cluster_node_timeout = CLUSTER_DEFAULT_NODE_TIMEOUT;
+    server.cluster_configfile = zstrdup(CONFIG_DEFAULT_CLUSTER_CONFIG_FILE);
     server.next_client_id = 1; /* Client IDs, start from 1 .*/
     server.loading_process_events_interval_bytes = (1024*1024*2);
 
@@ -899,7 +898,7 @@ void initServerConfig(void) {
     appendServerSaveParams(60,10000); /* save after 1 minute and 10000 changes */
 
     /* Client output buffer limits */
-    for (j = 0; j < DISCNT_CLIENT_TYPE_COUNT; j++)
+    for (j = 0; j < CLIENT_TYPE_COUNT; j++)
         server.client_obuf_limits[j] = clientBufferLimitsDefaults[j];
 
     /* Double constants initialization */
@@ -921,7 +920,7 @@ void initServerConfig(void) {
     server.rpopCommand = lookupCommandByCString("rpop");
 
     /* Latency monitor */
-    server.latency_monitor_threshold = DISCNT_DEFAULT_LATENCY_MONITOR_THRESHOLD;
+    server.latency_monitor_threshold = CONFIG_DEFAULT_LATENCY_MONITOR_THRESHOLD;
 
     /* Debugging */
     server.assert_failed = "<no assertion failed>";
@@ -933,53 +932,53 @@ void initServerConfig(void) {
 
 /* This function will try to raise the max number of open files accordingly to
  * the configured max number of clients. It also reserves a number of file
- * descriptors (DISCNT_MIN_RESERVED_FDS) for extra operations of
+ * descriptors (CONFIG_MIN_RESERVED_FDS) for extra operations of
  * persistence, listening sockets, log files and so forth.
  *
  * If it will not be possible to set the limit accordingly to the configured
  * max number of clients, the function will do the reverse setting
  * server.maxclients to the value that we can actually handle. */
 void adjustOpenFilesLimit(void) {
-    rlim_t maxfiles = server.maxclients+DISCNT_MIN_RESERVED_FDS;
+    rlim_t maxfiles = server.maxclients+CONFIG_MIN_RESERVED_FDS;
     struct rlimit limit;
 
     if (getrlimit(RLIMIT_NOFILE,&limit) == -1) {
         serverLog(LL_WARNING,"Unable to obtain the current NOFILE limit (%s), assuming 1024 and setting the max clients configuration accordingly.",
             strerror(errno));
-        server.maxclients = 1024-DISCNT_MIN_RESERVED_FDS;
+        server.maxclients = 1024-CONFIG_MIN_RESERVED_FDS;
     } else {
         rlim_t oldlimit = limit.rlim_cur;
 
         /* Set the max number of files if the current limit is not enough
          * for our needs. */
         if (oldlimit < maxfiles) {
-            rlim_t f;
+            rlim_t bestlimit;
             int setrlimit_error = 0;
 
             /* Try to set the file limit to match 'maxfiles' or at least
              * to the higher value supported less than maxfiles. */
-            f = maxfiles;
-            while(f > oldlimit) {
+            bestlimit = maxfiles;
+            while(bestlimit > oldlimit) {
                 rlim_t decr_step = 16;
 
-                limit.rlim_cur = f;
-                limit.rlim_max = f;
+                limit.rlim_cur = bestlimit;
+                limit.rlim_max = bestlimit;
                 if (setrlimit(RLIMIT_NOFILE,&limit) != -1) break;
                 setrlimit_error = errno;
 
-                /* We failed to set file limit to 'f'. Try with a
+                /* We failed to set file limit to 'bestlimit'. Try with a
                  * smaller limit decrementing by a few FDs per iteration. */
-                if (f < decr_step) break;
-                f -= decr_step;
+                if (bestlimit < decr_step) break;
+                bestlimit -= decr_step;
             }
 
             /* Assume that the limit we get initially is still valid if
              * our last try was even lower. */
-            if (f < oldlimit) f = oldlimit;
+            if (bestlimit < oldlimit) bestlimit = oldlimit;
 
-            if (f != maxfiles) {
+            if (bestlimit != maxfiles) {
                 int old_maxclients = server.maxclients;
-                server.maxclients = f-DISCNT_MIN_RESERVED_FDS;
+                server.maxclients = bestlimit-CONFIG_MIN_RESERVED_FDS;
                 if (server.maxclients < 1) {
                     serverLog(LL_WARNING,"Your current 'ulimit -n' "
                         "of %llu is not enough for Discnt to start. "
@@ -1000,7 +999,7 @@ void adjustOpenFilesLimit(void) {
                     "maxclients has been reduced to %d to compensate for "
                     "low ulimit. "
                     "If you need higher maxclients increase 'ulimit -n'.",
-                    (unsigned long long) oldlimit, server.maxclients);
+                    (unsigned long long) bestlimit, server.maxclients);
             } else {
                 serverLog(LL_NOTICE,"Increased maximum number of open files "
                     "to %llu (it was originally set to %llu).",
@@ -1039,9 +1038,9 @@ void checkTcpBacklogSettings(void) {
  * contains no specific addresses to bind, this function will try to
  * bind * (all addresses) for both the IPv4 and IPv6 protocols.
  *
- * On success the function returns DISCNT_OK.
+ * On success the function returns C_OK.
  *
- * On error the function returns DISCNT_ERR. For the function to be on
+ * On error the function returns C_ERR. For the function to be on
  * error, at least one of the server.bindaddr addresses was
  * impossible to bind, or no bind addresses were specified in the server
  * configuration but the function is not able to bind * for at least
@@ -1086,12 +1085,12 @@ int listenToPort(int port, int *fds, int *count) {
                 "Creating Server TCP listening socket %s:%d: %s",
                 server.bindaddr[j] ? server.bindaddr[j] : "*",
                 port, server.neterr);
-            return DISCNT_ERR;
+            return C_ERR;
         }
         anetNonBlock(NULL,fds[*count]);
         (*count)++;
     }
-    return DISCNT_OK;
+    return C_OK;
 }
 
 /* Resets the stats that we expose via INFO or other means that we want
@@ -1105,7 +1104,7 @@ void resetServerStats(void) {
     server.stat_fork_time = 0;
     server.stat_fork_rate = 0;
     server.stat_rejected_conn = 0;
-    for (j = 0; j < DISCNT_METRIC_COUNT; j++) {
+    for (j = 0; j < STAT_METRIC_COUNT; j++) {
         server.inst_metric[j].idx = 0;
         server.inst_metric[j].last_sample_time = mstime();
         server.inst_metric[j].last_sample_count = 0;
@@ -1141,10 +1140,10 @@ void initServer(void) {
 
     createSharedObjects();
     adjustOpenFilesLimit();
-    server.el = aeCreateEventLoop(server.maxclients+DISCNT_EVENTLOOP_FDSET_INCR);
+    server.el = aeCreateEventLoop(server.maxclients+CONFIG_FDSET_INCR);
     /* Open the TCP listening socket for the user commands. */
     if (server.port != 0 &&
-        listenToPort(server.port,server.ipfd,&server.ipfd_count) == DISCNT_ERR)
+        listenToPort(server.port,server.ipfd,&server.ipfd_count) == C_ERR)
         exit(1);
 
     /* Open the listening Unix domain socket. */
@@ -1153,7 +1152,7 @@ void initServer(void) {
         server.sofd = anetUnixServer(server.neterr,server.unixsocket,
             server.unixsocketperm, server.tcp_backlog);
         if (server.sofd == ANET_ERR) {
-            serverLog(LL_WARNING, "Opening socket: %s", server.neterr);
+            serverLog(LL_WARNING, "Opening Unix socket: %s", server.neterr);
             exit(1);
         }
         anetNonBlock(NULL,server.sofd);
@@ -1230,13 +1229,13 @@ void populateCommandTable(void) {
 
         while(*f != '\0') {
             switch(*f) {
-            case 'w': c->flags |= DISCNT_CMD_WRITE; break;
-            case 'r': c->flags |= DISCNT_CMD_READONLY; break;
-            case 'm': c->flags |= DISCNT_CMD_DENYOOM; break;
-            case 'a': c->flags |= DISCNT_CMD_ADMIN; break;
-            case 'l': c->flags |= DISCNT_CMD_LOADING; break;
-            case 'M': c->flags |= DISCNT_CMD_SKIP_MONITOR; break;
-            case 'F': c->flags |= DISCNT_CMD_FAST; break;
+            case 'w': c->flags |= CMD_WRITE; break;
+            case 'r': c->flags |= CMD_READONLY; break;
+            case 'm': c->flags |= CMD_DENYOOM; break;
+            case 'a': c->flags |= CMD_ADMIN; break;
+            case 'l': c->flags |= CMD_LOADING; break;
+            case 'M': c->flags |= CMD_SKIP_MONITOR; break;
+            case 'F': c->flags |= CMD_FAST; break;
             default: serverPanic("Unsupported command flag"); break;
             }
             f++;
@@ -1302,14 +1301,14 @@ void replicationFeedMonitors(client *c, list *monitors, robj **argv, int argc) {
 
     gettimeofday(&tv,NULL);
     cmdrepr = sdscatprintf(cmdrepr,"%ld.%06ld ",(long)tv.tv_sec,(long)tv.tv_usec);
-    if (c->flags & DISCNT_UNIX_SOCKET) {
+    if (c->flags & CLIENT_UNIX_SOCKET) {
         cmdrepr = sdscatprintf(cmdrepr,"[unix:%s] ",server.unixsocket);
     } else {
         cmdrepr = sdscatprintf(cmdrepr,"[%s] ",getClientPeerId(c));
     }
 
     for (j = 0; j < argc; j++) {
-        if (argv[j]->encoding == DISCNT_ENCODING_INT) {
+        if (argv[j]->encoding == OBJ_ENCODING_INT) {
             cmdrepr = sdscatprintf(cmdrepr, "\"%ld\"", (long)argv[j]->ptr);
         } else {
             cmdrepr = sdscatrepr(cmdrepr,(char*)argv[j]->ptr,
@@ -1319,7 +1318,7 @@ void replicationFeedMonitors(client *c, list *monitors, robj **argv, int argc) {
             cmdrepr = sdscatlen(cmdrepr," ",1);
     }
     cmdrepr = sdscatlen(cmdrepr,"\r\n",2);
-    cmdobj = createObject(DISCNT_STRING,cmdrepr);
+    cmdobj = createObject(OBJ_STRING,cmdrepr);
 
     listRewind(monitors,&li);
     while((ln = listNext(&li))) {
@@ -1337,7 +1336,7 @@ void call(client *c, int flags) {
      * not generated from reading an AOF. */
     if (listLength(server.monitors) &&
         !server.loading &&
-        !(c->cmd->flags & DISCNT_CMD_SKIP_MONITOR))
+        !(c->cmd->flags & CMD_SKIP_MONITOR))
     {
         replicationFeedMonitors(c,server.monitors,c->argv,c->argc);
     }
@@ -1348,7 +1347,7 @@ void call(client *c, int flags) {
     duration = ustime()-start;
 
     /* Populate the per-command statistics that we show in INFO commandstats. */
-    if (flags & DISCNT_CALL_STATS) {
+    if (flags & CMD_CALL_STATS) {
         c->cmd->microseconds += duration;
         c->cmd->calls++;
     }
@@ -1370,8 +1369,8 @@ int processCommand(client *c) {
      * a regular command proc. */
     if (!strcasecmp(c->argv[0]->ptr,"quit")) {
         addReply(c,shared.ok);
-        c->flags |= DISCNT_CLOSE_AFTER_REPLY;
-        return DISCNT_ERR;
+        c->flags |= CLIENT_CLOSE_AFTER_REPLY;
+        return C_ERR;
     }
 
     /* Now lookup the command and check ASAP about trivial error conditions
@@ -1380,26 +1379,26 @@ int processCommand(client *c) {
     if (!c->cmd) {
         addReplyErrorFormat(c,"unknown command '%s'",
             (char*)c->argv[0]->ptr);
-        return DISCNT_OK;
+        return C_OK;
     } else if ((c->cmd->arity > 0 && c->cmd->arity != c->argc) ||
                (c->argc < -c->cmd->arity)) {
         addReplyErrorFormat(c,"wrong number of arguments for '%s' command",
             c->cmd->name);
-        return DISCNT_OK;
+        return C_OK;
     }
 
     /* Check if the user is authenticated */
     if (server.requirepass && !c->authenticated && c->cmd->proc != authCommand)
     {
         addReply(c,shared.noautherr);
-        return DISCNT_OK;
+        return C_OK;
     }
 
     /* Handle the maxmemory directive. */
     if (server.maxmemory) {
-        if (getMemoryWarningLevel() && c->cmd->flags & DISCNT_CMD_DENYOOM) {
+        if (getMemoryWarningLevel() && c->cmd->flags & CMD_DENYOOM) {
             addReply(c, shared.oomerr);
-            return DISCNT_OK;
+            return C_OK;
         }
     }
 
@@ -1407,23 +1406,23 @@ int processCommand(client *c) {
      * and if this is a master instance. */
     if ((server.stop_writes_on_bgsave_err &&
         server.saveparamslen > 0 &&
-        server.lastbgsave_status == DISCNT_ERR) &&
-        (c->cmd->flags & DISCNT_CMD_WRITE ||
+        server.lastbgsave_status == C_ERR) &&
+        (c->cmd->flags & CMD_WRITE ||
          c->cmd->proc == pingCommand))
     {
         addReply(c, shared.bgsaveerr);
-        return DISCNT_OK;
+        return C_OK;
     }
 
     /* Loading DB? Return an error if the command has not the
-     * DISCNT_CMD_LOADING flag. */
-    if (server.loading && !(c->cmd->flags & DISCNT_CMD_LOADING)) {
+     * CMD_LOADING flag. */
+    if (server.loading && !(c->cmd->flags & CMD_LOADING)) {
         addReply(c, shared.loadingerr);
-        return DISCNT_OK;
+        return C_OK;
     }
 
-    call(c,DISCNT_CALL_FULL);
-    return DISCNT_OK;
+    call(c,CMD_CALL_FULL);
+    return C_OK;
 }
 
 /*================================== Shutdown =============================== */
@@ -1460,14 +1459,14 @@ int prepareForShutdown(int flags) {
     if ((server.saveparamslen > 0 && !nosave) || save) {
         serverLog(LL_NOTICE,"Saving the final DDB snapshot before exiting.");
         /* Snapshotting. Perform a SYNC SAVE and exit */
-        if (ddbSave(server.ddb_filename) != DISCNT_OK) {
+        if (ddbSave(server.ddb_filename) != C_OK) {
             /* Ooops.. error saving! The best we can do is to continue
              * operating. Note that if there was a background saving process,
              * in the next cron() Redis will be notified that the background
              * saving aborted, handling special stuff like slaves pending for
              * synchronization... */
             serverLog(LL_WARNING,"Error trying to save the DB, can't exit.");
-            return DISCNT_ERR;
+            return C_ERR;
         }
     }
     if (server.daemonize) {
@@ -1478,7 +1477,7 @@ int prepareForShutdown(int flags) {
     /* Close the listening sockets. Apparently this allows faster restarts. */
     closeListeningSockets(1);
     serverLog(LL_WARNING,"Discnt is now ready to exit, bye bye...");
-    return DISCNT_OK;
+    return C_OK;
 }
 
 /*================================== Commands =============================== */
@@ -1493,7 +1492,7 @@ int prepareForShutdown(int flags) {
  * possible branch misprediction related leak.
  */
 int time_independent_strcmp(char *a, char *b) {
-    char bufa[DISCNT_AUTHPASS_MAX_LEN], bufb[DISCNT_AUTHPASS_MAX_LEN];
+    char bufa[CONFIG_AUTHPASS_MAX_LEN], bufb[CONFIG_AUTHPASS_MAX_LEN];
     /* The above two strlen perform len(a) + len(b) operations where either
      * a or b are fixed (our password) length, and the difference is only
      * relative to the length of the user provided string, so no information
@@ -1591,7 +1590,7 @@ void shutdownCommand(client *c) {
      */
     if (server.loading)
         flags = (flags & ~SHUTDOWN_SAVE) | SHUTDOWN_NOSAVE;
-    if (prepareForShutdown(flags) == DISCNT_OK) exit(0);
+    if (prepareForShutdown(flags) == C_OK) exit(0);
     addReplyError(c,"Errors trying to SHUTDOWN. Check logs.");
 }
 
@@ -1620,14 +1619,14 @@ void addReplyCommand(client *c, struct serverCommand *cmd) {
 
         int flagcount = 0;
         void *flaglen = addDeferredMultiBulkLength(c);
-        flagcount += addReplyCommandFlag(c,cmd,DISCNT_CMD_WRITE, "write");
-        flagcount += addReplyCommandFlag(c,cmd,DISCNT_CMD_READONLY, "readonly");
-        flagcount += addReplyCommandFlag(c,cmd,DISCNT_CMD_DENYOOM, "denyoom");
-        flagcount += addReplyCommandFlag(c,cmd,DISCNT_CMD_ADMIN, "admin");
-        flagcount += addReplyCommandFlag(c,cmd,DISCNT_CMD_RANDOM, "random");
-        flagcount += addReplyCommandFlag(c,cmd,DISCNT_CMD_LOADING, "loading");
-        flagcount += addReplyCommandFlag(c,cmd,DISCNT_CMD_SKIP_MONITOR, "skip_monitor");
-        flagcount += addReplyCommandFlag(c,cmd,DISCNT_CMD_FAST, "fast");
+        flagcount += addReplyCommandFlag(c,cmd,CMD_WRITE, "write");
+        flagcount += addReplyCommandFlag(c,cmd,CMD_READONLY, "readonly");
+        flagcount += addReplyCommandFlag(c,cmd,CMD_DENYOOM, "denyoom");
+        flagcount += addReplyCommandFlag(c,cmd,CMD_ADMIN, "admin");
+        flagcount += addReplyCommandFlag(c,cmd,CMD_RANDOM, "random");
+        flagcount += addReplyCommandFlag(c,cmd,CMD_LOADING, "loading");
+        flagcount += addReplyCommandFlag(c,cmd,CMD_SKIP_MONITOR, "skip_monitor");
+        flagcount += addReplyCommandFlag(c,cmd,CMD_FAST, "fast");
         setDeferredMultiBulkLength(c, flaglen, flagcount);
 
         addReplyLongLong(c, cmd->firstkey);
@@ -1841,7 +1840,7 @@ sds genDiscntInfoString(char *section) {
             server.dirty,
             server.ddb_child_pid != -1,
             (intmax_t)server.lastsave,
-            (server.lastbgsave_status == DISCNT_OK) ? "ok" : "err",
+            (server.lastbgsave_status == C_OK) ? "ok" : "err",
             (intmax_t)server.ddb_save_time_last,
             (intmax_t)((server.ddb_child_pid == -1) ?
                 -1 : time(NULL)-server.ddb_save_time_start));
@@ -1894,11 +1893,11 @@ sds genDiscntInfoString(char *section) {
             "latest_fork_usec:%lld\r\n",
             server.stat_numconnections,
             server.stat_numcommands,
-            getInstantaneousMetric(DISCNT_METRIC_COMMAND),
+            getInstantaneousMetric(STAT_METRIC_COMMAND),
             server.stat_net_input_bytes,
             server.stat_net_output_bytes,
-            (float)getInstantaneousMetric(DISCNT_METRIC_NET_INPUT)/1024,
-            (float)getInstantaneousMetric(DISCNT_METRIC_NET_OUTPUT)/1024,
+            (float)getInstantaneousMetric(STAT_METRIC_NET_INPUT)/1024,
+            (float)getInstantaneousMetric(STAT_METRIC_NET_OUTPUT)/1024,
             server.stat_rejected_conn,
             server.stat_fork_time);
     }
@@ -1949,9 +1948,9 @@ void infoCommand(client *c) {
 
 void monitorCommand(client *c) {
     /* ignore MONITOR if already slave or in monitor mode */
-    if (c->flags & DISCNT_MONITOR) return;
+    if (c->flags & CLIENT_MONITOR) return;
 
-    c->flags |= DISCNT_MONITOR;
+    c->flags |= CLIENT_MONITOR;
     listAddNodeTail(server.monitors,c);
     addReply(c,shared.ok);
 }
@@ -2077,7 +2076,7 @@ void discntAsciiArt(void) {
             server.port,
             (long) getpid()
         );
-        serverLogRaw(LL_NOTICE|DISCNT_LOG_RAW,buf);
+        serverLogRaw(LL_NOTICE|LL_RAW,buf);
     }
     zfree(buf);
 }
@@ -2139,7 +2138,7 @@ void memtest(size_t megabytes, int passes);
 
 void loadDataFromDisk(void) {
   long long start = ustime();
-  if (ddbLoad(server.ddb_filename) == DISCNT_OK) {
+  if (ddbLoad(server.ddb_filename) == C_OK) {
     serverLog(LL_NOTICE,"DB loaded from disk: %.3f seconds",
         (float)(ustime()-start)/1000000);
   } else if (errno != ENOENT) {
@@ -2161,7 +2160,7 @@ void serverSetProcTitle(char *title) {
         server.bindaddr_count ? server.bindaddr[0] : "*",
         server.port);
 #else
-    DISCNT_NOTUSED(title);
+    UNUSED(title);
 #endif
 }
 

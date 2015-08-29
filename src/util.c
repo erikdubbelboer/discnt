@@ -10,7 +10,7 @@
  *   * Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Discnt nor the names of its contributors may be used
+ *   * Neither the name of Disque nor the names of its contributors may be used
  *     to endorse or promote products derived from this software without
  *     specific prior written permission.
  *
@@ -238,6 +238,18 @@ uint32_t digits10(uint64_t v) {
     return 12 + digits10(v / 1000000000000UL);
 }
 
+/* Like digits10() but for signed values. */
+uint32_t sdigits10(int64_t v) {
+    if (v < 0) {
+        /* Abs value of LLONG_MIN requires special handling. */
+        uint64_t uv = (v != LLONG_MIN) ?
+                      (uint64_t)-v : ((uint64_t) LLONG_MAX)+1;
+        return digits10(uv)+1; /* +1 for the minus. */
+    } else {
+        return digits10(v);
+    }
+}
+
 /* Convert a long long into a string. Returns the number of
  * characters needed to represent the number.
  * If the buffer is not big enough to store the string, 0 is returned.
@@ -424,8 +436,8 @@ int d2string(char *buf, size_t len, double value) {
     return len;
 }
 
-/* Generate the Discnt "Run ID", a SHA1-sized random number that identifies a
- * given execution of Discnt, so that if you are talking with an instance
+/* Generate the Disque "Run ID", a SHA1-sized random number that identifies a
+ * given execution of Disque, so that if you are talking with an instance
  * having run_id == A, and you reconnect and it has run_id == B, you can be
  * sure that it is either a different instance or it was restarted. */
 void getRandomHexChars(char *p, unsigned int len) {
@@ -556,7 +568,7 @@ sds getAbsolutePath(char *filename) {
 /* Return true if the specified path is just a file basename without any
  * relative or absolute path. This function just checks that no / or \
  * character exists inside the specified path, that's enough in the
- * environments where Discnt runs. */
+ * environments where Disque runs. */
 int pathIsBaseName(char *path) {
     return strchr(path,'/') == NULL && strchr(path,'\\') == NULL;
 }

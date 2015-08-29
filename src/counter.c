@@ -27,7 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "discnt.h"
+#include "server.h"
 #include "counter.h"
 #include "endianconv.h"
 
@@ -136,7 +136,7 @@ void genericIncrCommand(client *c, long double increment) {
         cntr->myshard->node = myself;
         cntr->myshard->value = increment;
 
-        memcpy(cntr->myshard->node_name,myself->name,DISCNT_CLUSTER_NAMELEN);
+        memcpy(cntr->myshard->node_name,myself->name,CLUSTER_NAMELEN);
 
         listAddNodeTail(cntr->shards, cntr->myshard);
     } else {
@@ -154,7 +154,7 @@ void incrCommand(client *c) {
 
 void incrbyCommand(client *c) {
     long double increment;
-    if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != DISCNT_OK)
+    if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != C_OK)
         return;
     genericIncrCommand(c, increment);
 }
@@ -165,7 +165,7 @@ void decrCommand(client *c) {
 
 void decrbyCommand(client *c) {
     long double increment;
-    if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != DISCNT_OK)
+    if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != C_OK)
         return;
     genericIncrCommand(c, -increment);
 }
@@ -197,7 +197,7 @@ void precisionCommand(client *c) {
         return;
     }
 
-    if (getDoubleFromObjectOrReply(c, c->argv[2], &precision, NULL) != DISCNT_OK)
+    if (getDoubleFromObjectOrReply(c, c->argv[2], &precision, NULL) != C_OK)
         return;
 
     if (cntr == NULL) {
@@ -258,7 +258,7 @@ void countersAddNode(clusterNode *node) {
         while ((ln = listNext(&li)) != NULL) {
             shrd = listNodeValue(ln);
 
-            if (memcmp(shrd->node_name, node->name, DISCNT_CLUSTER_NAMELEN) == 0) {
+            if (memcmp(shrd->node_name, node->name, CLUSTER_NAMELEN) == 0) {
                 shrd->node = node;
             }
         }
