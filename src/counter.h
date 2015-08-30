@@ -58,7 +58,7 @@ typedef struct counter {
     long double *history; /* History of this counter per second for server.history_size seconds. */
 
     uint32_t revision;
-    dict     *acks;
+    dict     *want_acks;
     mstime_t updated;
     double precision;  /* Desired prediction precision. */
 
@@ -71,14 +71,13 @@ typedef struct counter {
  * Exported API.
  *----------------------------------------------------------------------------*/
 
-void counterClearAcks(counter *cntr);
-void counterAddAck(counter *cntr, clusterNode *node);
-counter *counterLookup(sds name);
-counter *counterCreate(sds name); /* Create a counter but don't add it to server.counters. */
-void counterAdd(counter *cntr);   /* Add the counter to server.counters. */
-void counterFree(counter *cntr);
-void countersAddNode(clusterNode *node);
-void countersNodeFail(clusterNode *node);
-void countersUpdateValues(void);
+void counterClearWantAcks(counter *cntr);
+void counterWantAck(counter *cntr, const clusterNode *node);
+void counterGotAck(counter *cntr, const clusterNode *node);
+counter *counterLookup(const sds name);
+counter *counterCreate(sds name);
+shard *counterAddShard(counter *cntr, clusterNode* node, const char *node_name);
+void countersClusterAddNode(clusterNode *node);
+void countersClusterNodeFail(const clusterNode *node);
 
 #endif

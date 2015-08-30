@@ -30,4 +30,12 @@ start_server {tags {"counters"}} {
         r config set precision 0.1
         r config set precision 1.0
     } {OK}
+
+    test {SET} {
+        r set test 1
+    } {1}
+
+    test {GET aftet SET} {
+        r get test
+    } {1}
 }

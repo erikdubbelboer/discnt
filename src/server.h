@@ -747,8 +747,8 @@ void clusterBeforeSleep(void);
 void clusterSendUpdate(mstime_t after);
 
 /* Counters */
-void countersHistoryCron(void);
-void countersValueCron(void);
+void countersCron(void);
+void countersUpdateValues(void);
 
 /* Blocked clients */
 void processUnblockedClients(void);
@@ -786,6 +786,7 @@ void decrbyCommand(client *c);
 void getCommand(client *c);
 void keysCommand(client *c);
 void precisionCommand(client *c);
+void setCommand(client *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));

@@ -105,15 +105,24 @@ ssize_t ddbSaveRawString(rio *ddb, unsigned char *s, size_t len) {
     return nwritten;
 }
 
-sds ddbLoadSds(rio *ddb) {
+/* Load a string into an sds.
+ * Reusing the space already available in s. */
+sds ddbLoadSds(rio *ddb, sds s) {
     uint32_t len;
-    sds s;
 
     len = ddbLoadLen(ddb);
 
-    if (len == DDB_LENERR) return NULL;
+    if (len == DDB_LENERR) {
+        if (s) sdsfree(s);
+        return NULL;
+    }
 
-    s = sdsnewlen(NULL,len);
+    if (s == NULL) {
+        s = sdsnewlen(NULL,len);
+    } else {
+        sdsclear(s);
+        s = sdsgrowzero(s, len);
+    }
     if (len && rioRead(ddb,s,len) == 0) {
         sdsfree(s);
         return NULL;
@@ -174,7 +183,7 @@ int ddbLoadDouble(rio *ddb, double *val) {
     return 0;
 }
 
-int ddbSaveCounter(rio *ddb, counter* cntr) {
+int ddbSaveCounter(rio *ddb, const counter* cntr) {
     int n;
     size_t nwritten = 0;
     listNode *ln;
@@ -389,7 +398,7 @@ int ddbLoadCounter(rio *ddb) {
     sds name = NULL;
     counter *cntr = NULL;
 
-    if ((name = ddbLoadSds(ddb)) == NULL) return -1;
+    if ((name = ddbLoadSds(ddb,name)) == NULL) return -1;
 
     cntr = counterCreate(name);
 
@@ -405,46 +414,31 @@ int ddbLoadCounter(rio *ddb) {
 
     for (i = 0; i < n; i++) {
         clusterNode *node;
-        shard *shrd = zcalloc(sizeof(shard));
+        shard* shrd;
 
-        listAddNodeTail(cntr->shards, shrd);
-
-        if ((name = ddbLoadSds(ddb)) == NULL) goto rerr;
+        if ((name = ddbLoadSds(ddb,name)) == NULL) goto rerr;
 
         if (sdslen(name) != CLUSTER_NAMELEN) {
-            sdsfree(name);
             goto rerr;
         }
 
-        memcpy(shrd->node_name,name,CLUSTER_NAMELEN);
-        sdsfree(name);
+        node = clusterLookupNode(name);
+        shrd = counterAddShard(cntr, node, name);
 
         if (ddbLoadLongDouble(ddb,&shrd->value) == -1) goto rerr;
 
         if (ddbLoadLongDouble(ddb,&shrd->predict_value) == -1) goto rerr;
 
         if (ddbLoadLongDouble(ddb,&shrd->predict_change) == -1) goto rerr;
-
-        node = clusterLookupNode(name);
-        if (node) {
-            shrd->node = node;
-
-            if (node == myself) {
-                cntr->myshard = shrd;
-            }
-        }
     }
 
-    counterAdd(cntr);
+    sdsfree(name);
 
     return 0;
 
 rerr:
-
-    if (cntr) {
-        counterFree(cntr);
-        sdsfree(cntr->name);
-    }
+    sdsfree(name);
+    dictDelete(server.counters,cntr->name);
 
     return -1;
 }

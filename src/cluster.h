@@ -220,6 +220,6 @@ void clusterUpdateReachableNodes(void);
 struct counter;
 
 void clusterSendShardToNode(struct counter* cntr, clusterNode *node);
-void clusterSendShard(struct counter* cntr);
+void clusterSendShard(struct counter* cntr); /* To all nodes. */
 
 #endif /* __DISCNT_CLUSTER_H */

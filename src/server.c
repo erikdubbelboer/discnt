@@ -130,6 +130,7 @@ struct serverCommand serverCommandTable[] = {
     {"get",getCommand,2,"rF",0,NULL,0,0,0,0,0},
     {"keys",keysCommand,2,"r",0,NULL,0,0,0,0,0},
     {"precision",precisionCommand,-2,"wmF",0,NULL,0,0,0,0,0},
+    {"set",setCommand,3,"wmF",0,NULL,0,0,0,0,0},
 };
 
 /*============================ Utility functions ============================ */
@@ -688,11 +689,11 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     databasesCron();
 
     run_with_period(1000) {
-        countersHistoryCron();
+        countersCron();
     }
 
     run_with_period(100) {
-        countersValueCron();
+        countersUpdateValues();
     }
 
     /* Check if a background saving in progress terminated. */

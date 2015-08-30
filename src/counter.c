@@ -38,66 +38,68 @@ void counterUpdateHistory(counter *cntr) {
     cntr->history[server.history_index] = cntr->myshard->value;
 }
 
+/* Make a new prediction for our shard. */
 void counterPredict(counter *cntr, mstime_t now, int history_last_index) {
     long double change = 0, last = cntr->myshard->value;
-    int i;
 
-    for (i = history_last_index; i >= 0; i--) {
-        change += (last - cntr->history[i]);
-        last    = cntr->history[i];
-    }
-    for (i = server.history_size - 1; i > history_last_index; i--) {
-        change += (last - cntr->history[i]);
-        last    = cntr->history[i];
-    }
+    /* Sum the difference of the last server.history_size+1 seconds:
+     *
+     * for (i = history_last_index; i >= 0; i--) {
+     *     change += (last - cntr->history[i]);
+     *     last    = cntr->history[i];
+     * }
+     * for (i = server.history_size - 1; i > history_last_index; i--) {
+     *     change += (last - cntr->history[i]);
+     *     last    = cntr->history[i];
+     * }
+     *
+     * This is the same as:
+     */
+    change = last - cntr->history[history_last_index];
 
     cntr->myshard->predict_time   = now;
     cntr->myshard->predict_value  = cntr->myshard->value;
     cntr->myshard->predict_change = change / ((long double)(server.history_size) * 1000.0);
 }
 
-void counterClearAcks(counter *cntr) {
-    if (cntr->acks == NULL) {
-        cntr->acks = dictCreate(&clusterNodesDictType, NULL);
+void counterClearWantAcks(counter *cntr) {
+    if (cntr->want_acks == NULL) {
+        cntr->want_acks = dictCreate(&clusterNodesDictType, NULL);
     } else {
-        dictEmpty(cntr->acks, NULL);
+        dictEmpty(cntr->want_acks, NULL);
     }
 }
 
-void counterAddAck(counter *cntr, clusterNode *node) {
-    int retval = dictAdd(cntr->acks, node->name, NULL);
-    serverAssert(retval == 0);
+void counterWantAck(counter *cntr, const clusterNode *node) {
+    serverAssert(dictAdd(cntr->want_acks,(void*)node->name,NULL) == DICT_OK);
 }
 
-void counterFree(counter *cntr) {
+void counterGotAck(counter *cntr, const clusterNode *node) {
+    dictDelete(cntr->want_acks, node->name);
+    if (htNeedsResize(cntr->want_acks)) dictResize(cntr->want_acks);
+}
+
+void dictCounterDestructor(void *privdata, void *val) {
+    DICT_NOTUSED(privdata);
     listNode *ln;
     listIter li;
+    counter *cntr = val;
 
     listRewind(cntr->shards,&li);
     while ((ln = listNext(&li)) != NULL) {
         shard *shrd = listNodeValue(ln);
-
         zfree(shrd);
     }
 
     listRelease(cntr->shards);
-
-    if (cntr->acks) dictRelease(cntr->acks);
+    if (cntr->want_acks) dictRelease(cntr->want_acks);
 
     /* cntr->name will be freed by the dict code. */
 
     zfree(cntr);
 }
 
-void dictCounterDestructor(void *privdata, void *val) {
-    DICT_NOTUSED(privdata);
-
-    if (val == NULL) return; /* Values of swapped out keys as set to NULL */
-
-    counterFree(val);
-}
-
-counter *counterLookup(sds name) {
+counter *counterLookup(const sds name) {
     dictEntry *de = dictFind(server.counters, name);
     if (de) {
         return dictGetVal(de);
@@ -106,43 +108,87 @@ counter *counterLookup(sds name) {
     }
 }
 
+/* Create a counter and add it to server.counters. */
 counter *counterCreate(sds name) {
     counter *cntr = zcalloc(sizeof(counter) + (sizeof(long double) * server.history_size));
-
-    cntr->name      = name;
+    cntr->name      = sdsdup(name);
     cntr->shards    = listCreate();
     cntr->history   = (long double*)(cntr + 1);
     cntr->precision = server.precision;
 
+    serverAssert(dictAdd(server.counters, cntr->name, cntr) == DICT_OK);
+
     return cntr;
 }
 
-void counterAdd(counter *cntr) {
-    int retval = dictAdd(server.counters, cntr->name, cntr);
-    serverAssert(retval == 0);
+/* node can be NULL so node_name is a seperate parameter. */
+shard *counterAddShard(counter *cntr, clusterNode* node, const char *node_name) {
+    shard *shrd = zcalloc(sizeof(shard));
+    shrd->node = node;
+    memcpy(shrd->node_name,node_name,CLUSTER_NAMELEN);
+    if (node == myself) {
+        serverAssert(cntr->myshard == NULL);
+        cntr->myshard = shrd;
+    }
+    listAddNodeTail(cntr->shards, shrd);
+    return shrd;
 }
+
+void countersUpdateValues(void) {
+    dictIterator *it;
+    dictEntry *de;
+    mstime_t now = mstime();
+
+    it = dictGetIterator(server.counters);
+    while ((de = dictNext(it)) != NULL) {
+        long double elapsed, value = 0;
+        counter *cntr;
+        listNode *ln;
+        listIter li;
+        shard *shrd;
+
+        cntr = dictGetVal(de);
+
+        listRewind(cntr->shards,&li);
+        while ((ln = listNext(&li)) != NULL) {
+            shrd = listNodeValue(ln);
+
+            /* Don't do a prediction with our own shard. */
+            if (shrd == cntr->myshard) {
+                value += shrd->value;
+                continue;
+            }
+
+            if (shrd->predict_time > 0 && shrd->predict_value > 0) {
+                elapsed = now - shrd->predict_time;
+                shrd->value = shrd->predict_value + (elapsed * shrd->predict_change);
+            }
+
+            value += shrd->value;
+        }
+
+        cntr->value = value;
+    }
+    dictReleaseIterator(it);
+}
+
+/* -----------------------------------------------------------------------------
+ * Counter related commands
+ * -------------------------------------------------------------------------- */
 
 void genericIncrCommand(client *c, long double increment) {
     counter *cntr;
 
     cntr = counterLookup(c->argv[1]->ptr);
     if (cntr == NULL) {
-        cntr = counterCreate(sdsdup(c->argv[1]->ptr));
-        counterAdd(cntr);
+        cntr = counterCreate(c->argv[1]->ptr);
     }
 
     if (cntr->myshard == NULL) {
-        cntr->myshard = zcalloc(sizeof(shard));
-        cntr->myshard->node = myself;
-        cntr->myshard->value = increment;
-
-        memcpy(cntr->myshard->node_name,myself->name,CLUSTER_NAMELEN);
-
-        listAddNodeTail(cntr->shards, cntr->myshard);
-    } else {
-        cntr->myshard->value += increment;
+        counterAddShard(cntr, myself, myself->name);
     }
 
+    cntr->myshard->value += increment;
     cntr->value += increment;
     server.dirty++;
     addReplyLongDouble(c, cntr->value);
@@ -175,11 +221,49 @@ void getCommand(client *c) {
     counter *cntr;
 
     cntr = counterLookup(c->argv[1]->ptr);
-    if (cntr) {
+    if (cntr != NULL) {
         value = cntr->value;
     }
 
     addReplyLongDouble(c, value);
+}
+
+void setCommand(client *c) {
+    counter *cntr;
+    long double value;
+    unsigned int i;
+
+    if (getLongDoubleFromObjectOrReply(c,c->argv[2],&value,NULL) != C_OK)
+        return;
+
+    cntr = counterLookup(c->argv[1]->ptr);
+    if (cntr == NULL) {
+        cntr = counterCreate(c->argv[1]->ptr);
+    }
+
+    if (cntr->myshard == NULL) {
+        counterAddShard(cntr,myself,myself->name);
+    }
+
+    /* myshard->value        = 4
+     * cntr->value           = 10
+     * value                 = 2
+     * value in other shards = 6
+     * new myshard->value    = 2 - (10 - 4) = -4
+     */
+    cntr->myshard->value = value - (cntr->value - cntr->myshard->value);
+
+    /* Force a new prediction to be send. */
+    cntr->myshard->predict_time = 0;
+
+    /* Make sure the prediction is 0 so it doesn't change every second. */
+    for (i = 0; i < server.history_size; i++) {
+        cntr->history[i] = cntr->myshard->value;
+    }
+
+    cntr->value = value;
+    server.dirty++;
+    addReplyLongDouble(c, cntr->value);
 }
 
 void precisionCommand(client *c) {
@@ -188,6 +272,7 @@ void precisionCommand(client *c) {
 
     cntr = counterLookup(c->argv[1]->ptr);
     if (cntr == NULL && c->argc == 2) {
+        /* Counter doesn't exist, return the default precision. */
         addReplyDouble(c, server.precision);
         return;
     }
@@ -201,8 +286,7 @@ void precisionCommand(client *c) {
         return;
 
     if (cntr == NULL) {
-        cntr = counterCreate(sdsdup(c->argv[1]->ptr));
-        counterAdd(cntr);
+        cntr = counterCreate(c->argv[1]->ptr);
     }
 
     cntr->precision = precision;
@@ -235,7 +319,11 @@ void keysCommand(client *c) {
     setDeferredMultiBulkLength(c,replylen,numkeys);
 }
 
-void countersAddNode(clusterNode *node) {
+/* -----------------------------------------------------------------------------
+ * Cluster related
+ * -------------------------------------------------------------------------- */
+
+void countersClusterAddNode(clusterNode *node) {
     dictIterator *it;
     dictEntry *de;
     
@@ -250,6 +338,8 @@ void countersAddNode(clusterNode *node) {
 
         cntr = dictGetVal(de);
 
+        /* If we have our own shard make sure to send it's prediction
+         * to the new node. */
         if (cntr->myshard) {
             clusterSendShardToNode(cntr, node);
         }
@@ -266,7 +356,7 @@ void countersAddNode(clusterNode *node) {
     dictReleaseIterator(it);
 }
 
-void countersNodeFail(clusterNode *node) {
+void countersClusterNodeFail(const clusterNode *node) {
     dictIterator *it;
     dictEntry *de;
 
@@ -293,24 +383,28 @@ void countersNodeFail(clusterNode *node) {
     dictReleaseIterator(it);
 }
 
+/* Check if we need to resend our prediction of the counter to some nodes. */
 void counterMaybeResend(counter *cntr) {
-    int i;
     clusterNode *node;
+    int i;
 
-    if (cntr->acks == NULL || dictSize(cntr->acks) == 0) {
+    /* No acks to send? */
+    if (cntr->want_acks == NULL || dictSize(cntr->want_acks) == 0) {
         return;
     }
 
+    /* Too soon? */
     if (cntr->updated > mstime()-5000) {
         return;
     }
 
+    /* Only check reachable nodes that have a valid link. */
     for (i = 0; i < server.cluster->reachable_nodes_count; i++) {
         node = server.cluster->reachable_nodes[i];
 
         if (node->link == NULL) continue;
 
-        if (dictFind(cntr->acks, node->name) != NULL) {
+        if (dictFind(cntr->want_acks, node->name) != NULL) {
             clusterSendShardToNode(cntr, node);
         }
     }
@@ -321,7 +415,7 @@ void counterMaybeResend(counter *cntr) {
  * -------------------------------------------------------------------------- */
 
 /* This is executed every second */
-void countersHistoryCron(void) {
+void countersCron(void) {
     int history_last_index;
     dictIterator *it;
     dictEntry *de;
@@ -362,11 +456,11 @@ void countersHistoryCron(void) {
             }
         }
 
-        /* New prediction. */
-        cntr->revision++;
+        /* Make a new prediction. */
 
         server.stat_misses++;
         cntr->misses++;
+        cntr->revision++;
 
         counterPredict(cntr, now, history_last_index);
         clusterSendShard(cntr);
@@ -374,47 +468,6 @@ void countersHistoryCron(void) {
         counterUpdateHistory(cntr);
 
         cntr->updated = mstime();
-    }
-    dictReleaseIterator(it);
-}
-
-void countersValueCron(void) {
-    countersUpdateValues();
-}
-
-void countersUpdateValues(void) {
-    dictIterator *it;
-    dictEntry *de;
-    mstime_t now = mstime();
-
-    it = dictGetIterator(server.counters);
-    while ((de = dictNext(it)) != NULL) {
-        long double elapsed, value = 0;
-        counter *cntr;
-        listNode *ln;
-        listIter li;
-        shard *shrd;
-
-        cntr = dictGetVal(de);
-
-        listRewind(cntr->shards,&li);
-        while ((ln = listNext(&li)) != NULL) {
-            shrd = listNodeValue(ln);
-
-            if (shrd == cntr->myshard) {
-                value += shrd->value;
-                continue;
-            }
-
-            if (shrd->predict_time > 0 && shrd->predict_value > 0) {
-                elapsed = (now - shrd->predict_time);
-                shrd->value = shrd->predict_value + (elapsed * shrd->predict_change);
-            }
-
-            value += shrd->value;
-        }
-
-        cntr->value = value;
     }
     dictReleaseIterator(it);
 }
