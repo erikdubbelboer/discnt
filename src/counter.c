@@ -114,7 +114,7 @@ counter *counterCreate(sds name) {
     cntr->name      = sdsdup(name);
     cntr->shards    = listCreate();
     cntr->history   = (long double*)(cntr + 1);
-    cntr->precision = server.precision;
+    cntr->precision = server.default_precision;
 
     serverAssert(dictAdd(server.counters, cntr->name, cntr) == DICT_OK);
 
@@ -205,6 +205,13 @@ void incrbyCommand(client *c) {
     genericIncrCommand(c, increment);
 }
 
+void incrbyfloatCommand(client *c) {
+    long double increment;
+    if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != C_OK)
+        return;
+    genericIncrCommand(c, increment);
+}
+
 void decrCommand(client *c) {
     genericIncrCommand(c, -1.0);
 }
@@ -273,7 +280,7 @@ void precisionCommand(client *c) {
     cntr = counterLookup(c->argv[1]->ptr);
     if (cntr == NULL && c->argc == 2) {
         /* Counter doesn't exist, return the default precision. */
-        addReplyDouble(c, server.precision);
+        addReplyDouble(c, server.default_precision);
         return;
     }
 

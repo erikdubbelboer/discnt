@@ -251,12 +251,12 @@ void loadServerConfigFromString(char *config) {
             if (server.maxclients < 1) {
                 err = "Invalid max clients limit"; goto loaderr;
             }
-        } else if (!strcasecmp(argv[0],"precision") && argc == 2) {
-            server.precision = strtod(argv[1], NULL);
-            if (server.precision < 0) {
-                err = "Invalid precision"; goto loaderr;
+        } else if (!strcasecmp(argv[0],"default-precision") && argc == 2) {
+            server.default_precision = strtod(argv[1], NULL);
+            if (server.default_precision < 0) {
+                err = "Invalid default precision"; goto loaderr;
             }
-        } else if (!strcasecmp(argv[0],"history") && argc == 2) {
+        } else if (!strcasecmp(argv[0],"history-size") && argc == 2) {
             server.history_size = atoi(argv[1]);
             if (server.history_size < 1) {
                 err = "Invalid history"; goto loaderr;
@@ -584,9 +584,9 @@ void configSetCommand(client *c) {
             server.client_obuf_limits[class].soft_limit_seconds = soft_seconds;
         }
         sdsfreesplitres(v,vlen);
-    } config_set_special_field("precision") {
+    } config_set_special_field("default-precision") {
         if (getLongDoubleFromObject(o,&ld) == C_ERR || ld <= 0) goto badfmt;
-        server.precision = ld;
+        server.default_precision = ld;
 
     /* Boolean fields.
      * config_set_bool_field(name,var). */
@@ -618,7 +618,7 @@ void configSetCommand(client *c) {
         else
             disableWatchdog();
     } config_set_numerical_field(
-      "history",server.history_size,0,LLONG_MAX) {
+      "history-size",server.history_size,0,LLONG_MAX) {
 
     /* Memory fields.
      * config_set_memory_field(name,var) */
@@ -704,7 +704,7 @@ void configGetCommand(client *c) {
     config_get_numerical_field("watchdog-period",server.watchdog_period);
     config_get_numerical_field("hz",server.hz);
     config_get_numerical_field("cluster-node-timeout",server.cluster_node_timeout);
-    config_get_numerical_field("history",server.history_size);
+    config_get_numerical_field("history-size",server.history_size);
 
     /* Bool (yes/no) values */
     config_get_bool_field("stop-writes-on-bgsave-error",
@@ -723,9 +723,9 @@ void configGetCommand(client *c) {
 
     /* Everything we can't handle with macros follows. */
 
-    if (stringmatch(pattern,"precision",0)) {
-        d2string(buf,sizeof(buf),server.precision);
-        addReplyBulkCString(c,"precision");
+    if (stringmatch(pattern,"default-precision",0)) {
+        d2string(buf,sizeof(buf),server.default_precision);
+        addReplyBulkCString(c,"default-precision");
         addReplyBulkCString(c,buf);
         matches++;
     }
@@ -1319,8 +1319,8 @@ int rewriteConfig(char *path) {
     rewriteConfigDirOption(state);
     rewriteConfigStringOption(state,"requirepass",server.requirepass,NULL);
     rewriteConfigNumericalOption(state,"maxclients",server.maxclients,CONFIG_DEFAULT_MAX_CLIENTS);
-    rewriteConfigDoubleOption(state,"precision",server.precision,CONFIG_PRECISION);
-    rewriteConfigNumericalOption(state,"history",server.history_size,CONFIG_HISTORY);
+    rewriteConfigDoubleOption(state,"default-precision",server.default_precision,CONFIG_DEFAULT_PRECISION);
+    rewriteConfigNumericalOption(state,"history-size",server.history_size,CONFIG_HISTORY);
     rewriteConfigStringOption(state,"cluster-config-file",server.cluster_configfile,CONFIG_DEFAULT_CLUSTER_CONFIG_FILE);
     rewriteConfigNumericalOption(state,"cluster-node-timeout",server.cluster_node_timeout,CLUSTER_DEFAULT_NODE_TIMEOUT);
     rewriteConfigNumericalOption(state,"latency-monitor-threshold",server.latency_monitor_threshold,CONFIG_DEFAULT_LATENCY_MONITOR_THRESHOLD);

@@ -3,7 +3,10 @@
 Discnt, in-memory, distributed counters
 ===
 
-**WARNING: This is alpha code NOT suitable for production. The implementation and API will likely change in significant ways during the next months. The code and algorithms are not tested enough. A lot more work is needed.**
+[discnt.io](http://discnt.io)
+
+Discnt provides in memory distributed eventually consistent counters.
+
 
 Setup
 ===
@@ -39,33 +42,26 @@ API
 Discnt API is composed of a small set of commands, since the system solves a
 single very specific problem. The main commands are:
 
-    INCR   counter_name
-    INCRBY counter_name amount
-    DECR   counter_name
-    DECRBY counter_name amount
+    INCRBY counter_name increment
+Increments the counter by the specified increment. If the counter does not exist, it is set to 0 before performing the operation. 
+If the command is successful the new incremented value is stored and returned to the caller as a string.
+The precision of the output is fixed at 17 digits after the decimal point regardless of the actual internal precision of the computation.
+
+    SET counter_name value
+Set a counter to the specified value.
+
+A SET also resets the local prediction to 0 and broadcasts it.
 
     GET counter_name
+Get the value of the counter. If the counter does not exist 0 is retured.
+The precision of the output is fixed at 17 digits after the decimal point regardless of the actual internal value.
 
-And to get and set the per counter prediction precision:
+    PRECISION counter_name [value]
+Set or get the precision for the local counter. See [Predictions](http://discnt.io#predictions).
 
-    PRECISION counter_name <value>
 
-Other commands
-===
+For more see [discnt.io#api](http://discnt.io#api)
 
-Note: not everything implemented yet.
-
-    INFO
-Generic server information / stats.
-
-    HELLO
-Returns hello format version, this node ID, all the nodes IDs, IP addresses,
-ports, and priority (lower is better, means node more available).
-Clients should use this as an handshake command when connecting with a
-Discnt node.
-
-    KEYS patten
-Similar to redis KEYS.
 
 Client libraries
 ===

@@ -125,6 +125,7 @@ struct serverCommand serverCommandTable[] = {
     /* Counter commands. */
     {"incr",incrCommand,2,"wmF",0,NULL,0,0,0,0,0},
     {"incrby",incrbyCommand,3,"wmF",0,NULL,0,0,0,0,0},
+    {"incrbyfloat",incrbyfloatCommand,3,"wmF",0,NULL,0,0,0,0,0},
     {"decr",decrCommand,3,"wmF",0,NULL,0,0,0,0,0},
     {"decrby",decrbyCommand,3,"wmF",0,NULL,0,0,0,0,0},
     {"get",getCommand,2,"rF",0,NULL,0,0,0,0,0},
@@ -882,7 +883,7 @@ void initServerConfig(void) {
     server.stop_writes_on_bgsave_err = CONFIG_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR;
     server.activerehashing = CONFIG_DEFAULT_ACTIVE_REHASHING;
     server.maxclients = CONFIG_DEFAULT_MAX_CLIENTS;
-    server.precision = CONFIG_PRECISION;
+    server.default_precision = CONFIG_DEFAULT_PRECISION;
     server.history_size = CONFIG_HISTORY;
     server.history_index = 0;
     server.bpop_blocked_clients = 0;

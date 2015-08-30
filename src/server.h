@@ -84,7 +84,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define LOG_MAX_LEN    1024 /* Default maximum length of syslog messages */
 #define CONFIG_DEFAULT_MAX_CLIENTS 10000
 #define CONFIG_MAX_LINE 1024
-#define CONFIG_PRECISION 1
+#define CONFIG_DEFAULT_PRECISION 1
 #define CONFIG_HISTORY 10
 #define CONFIG_AUTHPASS_MAX_LEN 512
 #define CONFIG_DEFAULT_SLAVE_PRIORITY 100
@@ -457,7 +457,7 @@ struct discntServer {
     unsigned long long maxmemory;   /* Max number of memory bytes to use */
     /* Jobs & Queues */
     dict *counters;             /* Main counter hash table, by counter ID. */
-    double precision;           /* Desired prediction precision. */
+    double default_precision;   /* Default desired prediction precision. */
     unsigned int history_size;
     int history_index;
     /* Blocked clients */
@@ -781,6 +781,7 @@ void saveCommand(client *c);
 void bgsaveCommand(client *c);
 void incrCommand(client *c);
 void incrbyCommand(client *c);
+void incrbyfloatCommand(client *c);
 void decrCommand(client *c);
 void decrbyCommand(client *c);
 void getCommand(client *c);
