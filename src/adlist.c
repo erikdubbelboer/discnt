@@ -11,7 +11,7 @@
  *   * Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Discnt nor the names of its contributors may be used
+ *   * Neither the name of Redis nor the names of its contributors may be used
  *     to endorse or promote products derived from this software without
  *     specific prior written permission.
  *
@@ -84,14 +84,6 @@ list *listAddNodeHead(list *list, void *value)
     if ((node = zmalloc(sizeof(*node))) == NULL)
         return NULL;
     node->value = value;
-    return listAddNodeHeadPtr(list, node);
-}
-
-/* Add an existing node to the list, to head.
- *
- * The 'list' pointer you pass to the function is returned. */
-list *listAddNodeHeadPtr(list *list, listNode *node)
-{
     if (list->len == 0) {
         list->head = list->tail = node;
         node->prev = node->next = NULL;
@@ -118,16 +110,6 @@ list *listAddNodeTail(list *list, void *value)
     if ((node = zmalloc(sizeof(*node))) == NULL)
         return NULL;
     node->value = value;
-    return listAddNodeTailPtr(list, node);
-}
-
-/* Add an existing node to the list, to tail.
- *
- * On error, NULL is returned and no operation is performed (i.e. the
- * list remains unaltered).
- * On success the 'list' pointer you pass to the function is returned. */
-list *listAddNodeTailPtr(list *list, listNode *node)
-{
     if (list->len == 0) {
         list->head = list->tail = node;
         node->prev = node->next = NULL;
@@ -147,10 +129,6 @@ list *listInsertNode(list *list, listNode *old_node, void *value, int after) {
     if ((node = zmalloc(sizeof(*node))) == NULL)
         return NULL;
     node->value = value;
-    return listInsertNodePtr(list, old_node, node, after);
-}
-
-list *listInsertNodePtr(list *list, listNode *old_node, listNode *node, int after) {
     if (after) {
         node->prev = old_node;
         node->next = old_node->next;
@@ -180,18 +158,6 @@ list *listInsertNodePtr(list *list, listNode *old_node, listNode *node, int afte
  * This function can't fail. */
 void listDelNode(list *list, listNode *node)
 {
-    listDelNodePtr(list, node);
-    if (list->free) list->free(node->value);
-    zfree(node);
-    list->len--;
-}
-
-/* Remove the specified node from the specified list.
- * It's up to the caller to free the node and it's value.
- *
- * This function can't fail. */
-void listDelNodePtr(list *list, listNode *node)
-{
     if (node->prev)
         node->prev->next = node->next;
     else
@@ -200,6 +166,9 @@ void listDelNodePtr(list *list, listNode *node)
         node->next->prev = node->prev;
     else
         list->tail = node->prev;
+    if (list->free) list->free(node->value);
+    zfree(node);
+    list->len--;
 }
 
 /* Returns a list iterator 'iter'. After the initialization every

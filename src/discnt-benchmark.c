@@ -1,5 +1,6 @@
 /* Discnt benchmark utility.
  *
+ * Copyright (c) 2014-2015, Erik Dubbelboer <erik at dubbelboer dot com>
  * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
  * All rights reserved.
  *

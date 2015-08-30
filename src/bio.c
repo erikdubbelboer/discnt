@@ -59,17 +59,17 @@
 #include "server.h"
 #include "bio.h"
 
-static pthread_t bio_threads[DISCNT_BIO_NUM_OPS];
-static pthread_mutex_t bio_mutex[DISCNT_BIO_NUM_OPS];
-static pthread_cond_t bio_condvar[DISCNT_BIO_NUM_OPS];
-static list *bio_jobs[DISCNT_BIO_NUM_OPS];
+static pthread_t bio_threads[BIO_NUM_OPS];
+static pthread_mutex_t bio_mutex[BIO_NUM_OPS];
+static pthread_cond_t bio_condvar[BIO_NUM_OPS];
+static list *bio_jobs[BIO_NUM_OPS];
 /* The following array is used to hold the number of pending jobs for every
  * OP type. This allows us to export the bioPendingJobsOfType() API that is
  * useful when the main thread wants to perform some operation that may involve
  * objects shared with the background thread. The main thread will just wait
  * that there are no longer jobs of this type to be executed before performing
  * the sensible operation. This data is also useful for reporting. */
-static unsigned long long bio_pending[DISCNT_BIO_NUM_OPS];
+static unsigned long long bio_pending[BIO_NUM_OPS];
 
 /* This structure represents a background Job. It is only used locally to this
  * file as the API does not expose the internals at all. */
@@ -84,7 +84,7 @@ void *bioProcessBackgroundJobs(void *arg);
 
 /* Make sure we have enough stack to perform all the things we do in the
  * main thread. */
-#define DISCNT_THREAD_STACK_SIZE (1024*1024*4)
+#define DISQUE_THREAD_STACK_SIZE (1024*1024*4)
 
 /* Initialize the background system, spawning the thread. */
 void bioInit(void) {
@@ -94,7 +94,7 @@ void bioInit(void) {
     int j;
 
     /* Initialization of state vars and objects */
-    for (j = 0; j < DISCNT_BIO_NUM_OPS; j++) {
+    for (j = 0; j < BIO_NUM_OPS; j++) {
         pthread_mutex_init(&bio_mutex[j],NULL);
         pthread_cond_init(&bio_condvar[j],NULL);
         bio_jobs[j] = listCreate();
@@ -105,13 +105,13 @@ void bioInit(void) {
     pthread_attr_init(&attr);
     pthread_attr_getstacksize(&attr,&stacksize);
     if (!stacksize) stacksize = 1; /* The world is full of Solaris Fixes */
-    while (stacksize < DISCNT_THREAD_STACK_SIZE) stacksize *= 2;
+    while (stacksize < DISQUE_THREAD_STACK_SIZE) stacksize *= 2;
     pthread_attr_setstacksize(&attr, stacksize);
 
     /* Ready to spawn our threads. We use the single argument the thread
      * function accepts in order to pass the job ID the thread is
      * responsible of. */
-    for (j = 0; j < DISCNT_BIO_NUM_OPS; j++) {
+    for (j = 0; j < BIO_NUM_OPS; j++) {
         void *arg = (void*)(unsigned long) j;
         if (pthread_create(&thread,&attr,bioProcessBackgroundJobs,arg) != 0) {
             serverLog(LL_WARNING,"Fatal: Can't initialize Background Jobs.");
@@ -170,8 +170,10 @@ void *bioProcessBackgroundJobs(void *arg) {
         pthread_mutex_unlock(&bio_mutex[type]);
 
         /* Process the job accordingly to its type. */
-        if (type == DISCNT_BIO_CLOSE_FILE) {
+        if (type == BIO_CLOSE_FILE) {
             close((long)job->arg1);
+        } else if (type == BIO_AOF_FSYNC) {
+            aof_fsync((long)job->arg1);
         } else {
             serverPanic("Wrong job type in bioProcessBackgroundJobs().");
         }
@@ -201,7 +203,7 @@ unsigned long long bioPendingJobsOfType(int type) {
 void bioKillThreads(void) {
     int err, j;
 
-    for (j = 0; j < DISCNT_BIO_NUM_OPS; j++) {
+    for (j = 0; j < BIO_NUM_OPS; j++) {
         if (pthread_cancel(bio_threads[j]) == 0) {
             if ((err = pthread_join(bio_threads[j],NULL)) != 0) {
                 serverLog(LL_WARNING,

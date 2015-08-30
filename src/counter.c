@@ -38,8 +38,12 @@ void counterUpdateHistory(counter *cntr) {
     cntr->history[server.history_index] = cntr->myshard->value;
 }
 
-/* Make a new prediction for our shard. */
+/* Make a new prediction for our shard.
+ * history_last_index is the newest item in the history.
+ * server.history_index is the oldest item in the history.
+ */
 void counterPredict(counter *cntr, mstime_t now, int history_last_index) {
+    UNUSED(history_last_index);
     long double change = 0, last = cntr->myshard->value;
 
     /* Sum the difference of the last server.history_size+1 seconds:
@@ -55,7 +59,7 @@ void counterPredict(counter *cntr, mstime_t now, int history_last_index) {
      *
      * This is the same as:
      */
-    change = last - cntr->history[history_last_index];
+    change = last - cntr->history[server.history_index];
 
     cntr->myshard->predict_time   = now;
     cntr->myshard->predict_value  = cntr->myshard->value;
