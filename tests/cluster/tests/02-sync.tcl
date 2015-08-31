@@ -24,7 +24,7 @@ test "DECR should propagate" {
 
     set v [D 1 get test1]
     assert {$v <=  0}
-    assert {$v >= -2}
+    assert {$v >= -3}
 
     set v [D 1 get test2]
     assert {$v == 1}
