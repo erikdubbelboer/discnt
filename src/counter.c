@@ -170,11 +170,11 @@ void countersUpdateValues(void) {
                 continue;
             }
 
-            if (shrd->predict_time > 0 && shrd->predict_value > 0) {
+            if (shrd->predict_time > 0 && shrd->predict_value != 0) {
                 elapsed = now - shrd->predict_time;
                 shrd->value = shrd->predict_value + (elapsed * shrd->predict_change);
 
-            /*    serverLog(LL_DEBUG,"Counter %s new value %Lf for shard %.40s",
+                /*serverLog(LL_DEBUG,"Counter %s new value %Lf for shard %.40s",
                     cntr->name, shrd->value, shrd->node_name);
             } else {
                 serverLog(LL_DEBUG,"Counter %s not using shard of %.40s %llu %Lf",
