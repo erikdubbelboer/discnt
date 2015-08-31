@@ -163,9 +163,22 @@ void countersUpdateValues(void) {
                 continue;
             }
 
+            /* Don't update predictions for failing nodes. */
+            if (shrd->node == NULL || nodeFailed(shrd->node)) {
+                /*serverLog(LL_DEBUG,"Counter %s not using shard of %.40s",
+                    cntr->name, shrd->node_name);*/
+                continue;
+            }
+
             if (shrd->predict_time > 0 && shrd->predict_value > 0) {
                 elapsed = now - shrd->predict_time;
                 shrd->value = shrd->predict_value + (elapsed * shrd->predict_change);
+
+            /*    serverLog(LL_DEBUG,"Counter %s new value %Lf for shard %.40s",
+                    cntr->name, shrd->value, shrd->node_name);
+            } else {
+                serverLog(LL_DEBUG,"Counter %s not using shard of %.40s %llu %Lf",
+                    cntr->name, shrd->node_name, shrd->predict_time, shrd->predict_value);*/
             }
 
             value += shrd->value;
@@ -374,33 +387,6 @@ void countersClusterAddNode(clusterNode *node) {
 
             if (memcmp(shrd->node_name, node->name, CLUSTER_NAMELEN) == 0) {
                 shrd->node = node;
-            }
-        }
-    }
-    dictReleaseIterator(it);
-}
-
-void countersClusterNodeFail(const clusterNode *node) {
-    dictIterator *it;
-    dictEntry *de;
-
-    it = dictGetIterator(server.counters);
-    while ((de = dictNext(it)) != NULL) {
-        counter *cntr;
-        listNode *ln;
-        listIter li;
-        shard *shrd;
-
-        cntr = dictGetVal(de);
-
-        listRewind(cntr->shards,&li);
-        while ((ln = listNext(&li)) != NULL) {
-            shrd = listNodeValue(ln);
-
-            if (shrd->node == node) {
-                /* Remove prediction, don't update our prediction
-                   for this shard anymore. */
-                shrd->predict_time = 0;
             }
         }
     }

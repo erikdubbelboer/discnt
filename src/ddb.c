@@ -221,6 +221,9 @@ int ddbSaveCounter(rio *ddb, const counter* cntr) {
         if ((n = ddbSaveLongDouble(ddb,shrd->value)) == -1) return -1;
         nwritten += n;
 
+        if ((n = ddbSaveLongLong(ddb,shrd->predict_time)) == -1) return -1;
+        nwritten += n;
+
         if ((n = ddbSaveLongDouble(ddb,shrd->predict_value)) == -1) return -1;
         nwritten += n;
 
@@ -426,9 +429,17 @@ int ddbLoadCounter(rio *ddb) {
 
         if (ddbLoadLongDouble(ddb,&shrd->value) == -1) goto rerr;
 
+        if (ddbLoadLongLong(ddb,&shrd->predict_time) == -1) goto rerr;
+
         if (ddbLoadLongDouble(ddb,&shrd->predict_value) == -1) goto rerr;
 
         if (ddbLoadLongDouble(ddb,&shrd->predict_change) == -1) goto rerr;
+
+        /* Resend the predicion we just loaded. We do this in case we broadcast a
+         * new prediction before we saved. */
+        if (node == myself) {
+            shrd->predict_time = 0;
+        }
     }
 
     sdsfree(name);

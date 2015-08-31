@@ -825,8 +825,6 @@ void markNodeAsFailingIfNeeded(clusterNode *node) {
     node->flags |= CLUSTER_NODE_FAIL;
     node->fail_time = mstime();
 
-    countersClusterNodeFail(node);
-
     /* Broadcast the failing node name to everybody, forcing all the other
      * reachable nodes to flag the node as FAIL. */
     clusterSendFail(node->name);
@@ -936,7 +934,7 @@ void clusterProcessGossipSection(clusterMsg *hdr, clusterLink *link) {
     while(count--) {
         uint16_t flags = ntohs(g->flags);
         clusterNode *node;
-        sds ci;
+        /*sds ci;
 
         ci = representClusterNodeFlags(sdsempty(), flags);
         serverLog(LL_DEBUG,"GOSSIP %.40s %s:%d %s",
@@ -944,7 +942,7 @@ void clusterProcessGossipSection(clusterMsg *hdr, clusterLink *link) {
             g->ip,
             ntohs(g->port),
             ci);
-        sdsfree(ci);
+        sdsfree(ci);*/
 
         /* Update our state accordingly to the gossip sections */
         node = clusterLookupNode(g->nodename);
@@ -1053,8 +1051,8 @@ int clusterProcessPacket(clusterLink *link) {
     clusterNode *sender;
 
     server.cluster->stats_bus_messages_received++;
-    serverLog(LL_DEBUG,"--- Processing packet of type %d, %lu bytes",
-        type, (unsigned long) totlen);
+    /*serverLog(LL_DEBUG,"--- Processing packet of type %d, %lu bytes",
+        type, (unsigned long) totlen);*/
 
     /* Perform sanity checks */
     if (totlen < 16) return 1; /* At least signature, version, totlen, count. */
@@ -1096,7 +1094,7 @@ int clusterProcessPacket(clusterLink *link) {
 
     /* Initial processing of PING and MEET requests replying with a PONG. */
     if (type == CLUSTERMSG_TYPE_PING || type == CLUSTERMSG_TYPE_MEET) {
-        serverLog(LL_DEBUG,"Ping packet received: %p", (void*)link->node);
+        /*serverLog(LL_DEBUG,"Ping packet received: %p", (void*)link->node);*/
 
         /* We use incoming MEET messages in order to set the address
          * for 'myself', since only other cluster nodes will send us
@@ -1150,9 +1148,9 @@ int clusterProcessPacket(clusterLink *link) {
     if (type == CLUSTERMSG_TYPE_PING || type == CLUSTERMSG_TYPE_PONG ||
         type == CLUSTERMSG_TYPE_MEET)
     {
-        serverLog(LL_DEBUG,"%s packet received: %p",
+        /*serverLog(LL_DEBUG,"%s packet received: %p",
             type == CLUSTERMSG_TYPE_PING ? "ping" : "pong",
-            (void*)link->node);
+            (void*)link->node);*/
         if (link->node) {
             if (nodeInHandshake(link->node)) {
                 /* If we already have this node, try to change the
@@ -1242,8 +1240,6 @@ int clusterProcessPacket(clusterLink *link) {
             failing->flags |= CLUSTER_NODE_FAIL;
             failing->fail_time = mstime();
             failing->flags &= ~CLUSTER_NODE_PFAIL;
-
-            countersClusterNodeFail(failing);
 
             clusterDoBeforeSleep(CLUSTER_TODO_SAVE_CONFIG|
                                  CLUSTER_TODO_UPDATE_STATE);
@@ -1671,7 +1667,7 @@ void clusterCron(void) {
             }
         }
         if (min_pong_node) {
-            serverLog(LL_DEBUG,"Pinging node %.40s", min_pong_node->name);
+            /*serverLog(LL_DEBUG,"Pinging node %.40s", min_pong_node->name);*/
             clusterSendPing(min_pong_node->link, CLUSTERMSG_TYPE_PING);
         }
     }
@@ -2166,6 +2162,9 @@ void cluserReadShard(const clusterMsgDataCounter *msg, clusterNode *node) {
     predict_time   = intrev64ifbe(msg->predict_time);
     predict_value  = unpack754(intrev64ifbe(msg->predict_value), 64, 11);
     predict_change = unpack754(intrev64ifbe(msg->predict_change), 64, 11);
+
+    serverLog(LL_DEBUG,"Read shard for %s from %.40s %llu %Lf %Lf",
+        name, node->name, predict_time, predict_value, predict_change);
 
     cntr = counterLookup(name);
     if (cntr == NULL) {
