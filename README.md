@@ -52,9 +52,11 @@ Set a counter to the specified value.
 
 A SET also resets the local prediction to 0 and broadcasts it.
 
-    GET counter_name
+    GET counter_name [STATE]
 Get the value of the counter. If the counter does not exist 0 is retured.
 The precision of the output is fixed at 17 digits after the decimal point regardless of the actual internal value.
+If the optional STATE is specified GET returns a multi reply containing the value and either the string CONSISTENT or
+INCONSISTENT depending on the cluster state.
 
     PRECISION counter_name [value]
 Set or get the precision for the local counter. See [Predictions](http://discnt.io#predictions).

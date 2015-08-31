@@ -1910,7 +1910,8 @@ sds clusterGenNodesDescription(int filter) {
  * a list of reachable nodes (not in PFAIL state), excluding this node.
  * Note that nodes in handshake are skipped as not yet part of the cluster,
  * this means that handshake nodes are not referenced by jobs, and are nodes
- * that we can safely free. */
+ * that we can safely free.
+ * Now also updates failing_nodes_count. */
 void clusterUpdateReachableNodes(void) {
     dictIterator *di;
     dictEntry *de;
@@ -1919,10 +1920,14 @@ void clusterUpdateReachableNodes(void) {
     server.cluster->reachable_nodes =
         zrealloc(server.cluster->reachable_nodes,maxsize);
     server.cluster->reachable_nodes_count = 0;
+    server.cluster->failing_nodes_count = 0;
 
-    di = dictGetSafeIterator(server.cluster->nodes);
+    di = dictGetIterator(server.cluster->nodes);
     while((de = dictNext(di)) != NULL) {
         clusterNode *node = dictGetVal(de);
+
+        if (node->flags & (CLUSTER_NODE_PFAIL|
+                           CLUSTER_NODE_FAIL)) server.cluster->failing_nodes_count++;
 
         if (node->flags & (CLUSTER_NODE_MYSELF|
                            CLUSTER_NODE_HANDSHAKE|

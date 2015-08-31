@@ -129,7 +129,7 @@ struct serverCommand serverCommandTable[] = {
     {"incrbyfloat",incrbyfloatCommand,3,"wmF",0,NULL,0,0,0,0,0},
     {"decr",decrCommand,3,"wmF",0,NULL,0,0,0,0,0},
     {"decrby",decrbyCommand,3,"wmF",0,NULL,0,0,0,0,0},
-    {"get",getCommand,2,"rF",0,NULL,0,0,0,0,0},
+    {"get",getCommand,-2,"rF",0,NULL,0,0,0,0,0},
     {"keys",keysCommand,2,"r",0,NULL,0,0,0,0,0},
     {"precision",precisionCommand,-2,"wmF",0,NULL,0,0,0,0,0},
     {"set",setCommand,3,"wmF",0,NULL,0,0,0,0,0},

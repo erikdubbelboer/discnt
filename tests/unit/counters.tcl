@@ -8,6 +8,10 @@ start_server {tags {"counters"}} {
         r get test
     } {3}
 
+    test {GET with STATE} {
+        r get test state
+    } {3 CONSISTENT}
+
     test {GET on non existent counter should return 0} {
         r get doesnotexist
     } {0}

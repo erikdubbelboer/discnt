@@ -105,6 +105,7 @@ typedef struct clusterState {
      * random receivers of messages to populate. */
     clusterNode **reachable_nodes;
     int reachable_nodes_count;
+    int failing_nodes_count;
     /* Statistics. */
     long long stats_bus_messages_sent;  /* Num of msg sent via cluster bus. */
     long long stats_bus_messages_received; /* Num of msg rcvd via cluster bus.*/

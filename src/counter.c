@@ -235,8 +235,21 @@ void getCommand(client *c) {
     if (cntr != NULL) {
         value = cntr->value;
     }
-
-    addReplyLongDouble(c, value);
+    
+    if (c->argc == 2) {
+        addReplyLongDouble(c, value);
+    } else if (!strcasecmp(c->argv[2]->ptr,"state")) {
+        addReplyMultiBulkLen(c,2);
+        addReplyLongDouble(c, value);
+        if (server.cluster->failing_nodes_count > 0) {
+            addReplyString(c, "$12\r\nINCONSISTENT\r\n", sizeof("$12\r\nINCONSISTENT\r\n")-1);
+        } else {
+            addReplyString(c, "$10\r\nCONSISTENT\r\n", sizeof("$10\r\nCONSISTENT\r\n")-1);
+        }
+    } else {
+        addReplyErrorFormat(c, "Unknown GET option '%s'",
+            (char*)c->argv[2]->ptr);
+    }
 }
 
 void setCommand(client *c) {

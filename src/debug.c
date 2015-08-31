@@ -222,7 +222,7 @@ void debugCommand(client *c) {
             memcpy(&buf[5], shrd->node_name, CLUSTER_NAMELEN);
 
             addReplyMultiBulkLen(c,5);
-            addReplyString(c, buf, 5+40+2);
+            addReplyString(c, buf, (sizeof("$40\r\n")-1) + CLUSTER_NAMELEN + (sizeof("\r\n")-1));
             addReplyLongDouble(c, shrd->value);
             addReplyLongLong(c, shrd->predict_time);
             addReplyLongDouble(c, shrd->predict_value);
