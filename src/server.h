@@ -106,7 +106,6 @@ typedef long long mstime_t; /* millisecond time type. */
 #define CONFIG_DEFAULT_LOGFILE ""
 #define CONFIG_DEFAULT_SYSLOG_ENABLED 0
 #define CONFIG_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR 1
-#define CONFIG_DEFAULT_DDB_COMPRESSION 1
 #define CONFIG_DEFAULT_DDB_CHECKSUM 1
 #define CONFIG_DEFAULT_DDB_FILENAME "dump.ddb"
 #define CONFIG_DEFAULT_REPL_DISKLESS_SYNC 0
@@ -704,7 +703,6 @@ void stopLoading(void);
 /* Core functions */
 void flushServerData(void);
 int getMemoryWarningLevel(void);
-int freeMemoryIfNeeded(void);
 int processCommand(client *c);
 void setupSignalHandlers(void);
 struct serverCommand *lookupCommand(sds name);

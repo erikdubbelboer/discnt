@@ -28,7 +28,6 @@
  */
 
 #include "server.h"
-#include "lzf.h"    /* LZF compression library */
 #include "endianconv.h"
 #include "counter.h"
 

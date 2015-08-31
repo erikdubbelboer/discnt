@@ -252,6 +252,8 @@ void loadServerConfigFromString(char *config) {
             if (server.maxclients < 1) {
                 err = "Invalid max clients limit"; goto loaderr;
             }
+        } else if (!strcasecmp(argv[0],"maxmemory") && argc == 2) {
+            server.maxmemory = memtoll(argv[1],NULL);
         } else if (!strcasecmp(argv[0],"default-precision") && argc == 2) {
             server.default_precision = strtod(argv[1], NULL);
             if (server.default_precision < 0) {
@@ -261,10 +263,6 @@ void loadServerConfigFromString(char *config) {
             server.history_size = atoi(argv[1]);
             if (server.history_size < 1) {
                 err = "Invalid history"; goto loaderr;
-            }
-        } else if (!strcasecmp(argv[0],"ddbcompression") && argc == 2) {
-            if ((server.ddb_compression = yesnotoi(argv[1])) == -1) {
-                err = "argument must be 'yes' or 'no'"; goto loaderr;
             }
         } else if (!strcasecmp(argv[0],"ddbchecksum") && argc == 2) {
             if ((server.ddb_checksum = yesnotoi(argv[1])) == -1) {
@@ -456,6 +454,7 @@ void configSetCommand(client *c) {
     robj *o;
     long long ll;
     long double ld;
+    int err;
     serverAssertWithInfo(c,c->argv[2],sdsEncodedObject(c->argv[2]));
     serverAssertWithInfo(c,c->argv[3],sdsEncodedObject(c->argv[3]));
     o = c->argv[3];
@@ -592,8 +591,6 @@ void configSetCommand(client *c) {
     /* Boolean fields.
      * config_set_bool_field(name,var). */
     } config_set_bool_field(
-      "ddbcompression", server.ddb_compression) {
-    } config_set_bool_field(
       "activerehashing",server.activerehashing) {
     } config_set_bool_field(
       "tcp-keepalive",server.tcpkeepalive) {
@@ -623,6 +620,14 @@ void configSetCommand(client *c) {
 
     /* Memory fields.
      * config_set_memory_field(name,var) */
+    } config_set_memory_field("maxmemory",server.maxmemory) {
+        if (server.maxmemory) {
+            if (server.maxmemory < zmalloc_used_memory()) {
+                serverLog(LL_WARNING,"WARNING: the new maxmemory value set via CONFIG SET is smaller than the current memory usage. This will result in keys eviction and/or inability to accept new write commands depending on the maxmemory-policy.");
+            }
+        }
+    /* Enumeration fields.
+     * config_set_enum_field(name,var,enum_var) */
     } config_set_enum_field(
       "loglevel",server.verbosity,loglevel_enum) {
 
@@ -696,6 +701,7 @@ void configGetCommand(client *c) {
     config_get_string_field("pidfile",server.pidfile);
 
     /* Numerical values */
+    config_get_numerical_field("maxmemory",server.maxmemory);
     config_get_numerical_field("timeout",server.maxidletime);
     config_get_numerical_field("latency-monitor-threshold",
             server.latency_monitor_threshold);
@@ -712,7 +718,6 @@ void configGetCommand(client *c) {
             server.stop_writes_on_bgsave_err);
     config_get_bool_field("tcp-keepalive",server.tcpkeepalive);
     config_get_bool_field("daemonize", server.daemonize);
-    config_get_bool_field("ddbcompression", server.ddb_compression);
     config_get_bool_field("ddbchecksum", server.ddb_checksum);
     config_get_bool_field("activerehashing", server.activerehashing);
 
@@ -1314,12 +1319,12 @@ int rewriteConfig(char *path) {
     rewriteConfigSyslogfacilityOption(state);
     rewriteConfigSaveOption(state);
     rewriteConfigYesNoOption(state,"stop-writes-on-bgsave-error",server.stop_writes_on_bgsave_err,CONFIG_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR);
-    rewriteConfigYesNoOption(state,"ddbcompression",server.ddb_compression,CONFIG_DEFAULT_DDB_COMPRESSION);
     rewriteConfigYesNoOption(state,"ddbchecksum",server.ddb_checksum,CONFIG_DEFAULT_DDB_CHECKSUM);
     rewriteConfigStringOption(state,"dbfilename",server.ddb_filename,CONFIG_DEFAULT_DDB_FILENAME);
     rewriteConfigDirOption(state);
     rewriteConfigStringOption(state,"requirepass",server.requirepass,NULL);
     rewriteConfigNumericalOption(state,"maxclients",server.maxclients,CONFIG_DEFAULT_MAX_CLIENTS);
+    rewriteConfigBytesOption(state,"maxmemory",server.maxmemory,CONFIG_DEFAULT_MAXMEMORY);
     rewriteConfigDoubleOption(state,"default-precision",server.default_precision,CONFIG_DEFAULT_PRECISION);
     rewriteConfigNumericalOption(state,"history-size",server.history_size,CONFIG_HISTORY);
     rewriteConfigStringOption(state,"cluster-config-file",server.cluster_configfile,CONFIG_DEFAULT_CLUSTER_CONFIG_FILE);

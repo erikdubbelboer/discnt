@@ -879,7 +879,6 @@ void initServerConfig(void) {
     server.pidfile = zstrdup(CONFIG_DEFAULT_PID_FILE);
     server.ddb_filename = zstrdup(CONFIG_DEFAULT_DDB_FILENAME);
     server.requirepass = NULL;
-    server.ddb_compression = CONFIG_DEFAULT_DDB_COMPRESSION;
     server.ddb_checksum = CONFIG_DEFAULT_DDB_CHECKSUM;
     server.stop_writes_on_bgsave_err = CONFIG_DEFAULT_STOP_WRITES_ON_BGSAVE_ERROR;
     server.activerehashing = CONFIG_DEFAULT_ACTIVE_REHASHING;
