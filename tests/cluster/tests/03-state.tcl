@@ -12,7 +12,7 @@ test "Killing a node" {
     }
 
     # State is updated every 100ms so wait a bit.
-    after 110
+    after 200
 }
 
 test "State should be inconsistent" {
@@ -33,7 +33,7 @@ test "Restarting node" {
     }
 
     # State is updated every 100ms so wait a bit.
-    after 110
+    after 200
 }
 
 test "State should be consistent" {

@@ -64,6 +64,10 @@ typedef struct counter {
 
     uint32_t hits;
     uint32_t misses;
+
+    /* Cached output buffer. */
+    char rbuf[128];
+    int rlen;
 } counter;
 
 

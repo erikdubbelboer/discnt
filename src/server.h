@@ -82,6 +82,11 @@ typedef long long mstime_t; /* millisecond time type. */
 #define NET_MAX_WRITES_PER_EVENT (1024*64)
 #define OBJ_SHARED_INTEGERS 10000
 #define OBJ_SHARED_BULKHDR_LEN 32
+#define OBJ_SHARED_INF "$3\r\ninf\r\n"
+#define OBJ_SHARED_NINF "$4\r\n-inf\r\n"
+#define OBJ_SHARED_CONSISTENT "$10\r\nCONSISTENT\r\n"
+#define OBJ_SHARED_INCONSISTENT "$12\r\nINCONSISTENT\r\n"
+#define OBJ_SHARED_0STR "$1\r\n0\r\n"
 #define LOG_MAX_LEN    1024 /* Default maximum length of syslog messages */
 #define CONFIG_DEFAULT_MAX_CLIENTS 10000
 #define CONFIG_MAX_LINE 1024

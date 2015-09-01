@@ -138,6 +138,25 @@ shard *counterAddShard(counter *cntr, clusterNode* node, const char *node_name) 
     return shrd;
 }
 
+/* Build the counter's cached response buffer. */
+void counterCacheResponse(counter *cntr) {
+    char dbuf[128];
+    int dlen;
+
+    if (isinf(cntr->value)) {
+        if (cntr->value > 0) {
+            strcpy(cntr->rbuf, OBJ_SHARED_INF); /* inf */
+            cntr->rlen = sizeof(OBJ_SHARED_INF)-1;
+        } else {
+            strcpy(cntr->rbuf, OBJ_SHARED_NINF); /* -inf */
+            cntr->rlen = sizeof(OBJ_SHARED_NINF)-1;
+        }
+    } else {
+        dlen = snprintf(dbuf,sizeof(dbuf),"%.17Lg",cntr->value);
+        cntr->rlen = snprintf(cntr->rbuf,sizeof(cntr->rbuf),"$%d\r\n%s\r\n",dlen,dbuf);
+    }
+}
+
 void countersUpdateValues(void) {
     dictIterator *it;
     dictEntry *de;
@@ -184,7 +203,12 @@ void countersUpdateValues(void) {
             value += shrd->value;
         }
 
-        cntr->value = value;
+        if (cntr->value != value) {
+            cntr->value = value;
+
+            /* Make sure the cached response gets recalculated. */
+            cntr->rlen = 0;
+        }
     }
     dictReleaseIterator(it);
 }
@@ -208,7 +232,8 @@ void genericIncrCommand(client *c, long double increment) {
     cntr->myshard->value += increment;
     cntr->value += increment;
     server.dirty++;
-    addReplyLongDouble(c, cntr->value);
+    counterCacheResponse(cntr);
+    addReplyString(c,cntr->rbuf,cntr->rlen);
 }
 
 void incrCommand(client *c) {
@@ -241,23 +266,38 @@ void decrbyCommand(client *c) {
 }
 
 void getCommand(client *c) {
-    long double value = 0;
     counter *cntr;
 
     cntr = counterLookup(c->argv[1]->ptr);
-    if (cntr != NULL) {
-        value = cntr->value;
+    if (cntr == NULL) {
+        if (c->argc == 2) {
+            addReplyString(c,OBJ_SHARED_0STR,sizeof(OBJ_SHARED_0STR)-1);
+        } else if (!strcasecmp(c->argv[2]->ptr,"state")) {
+            addReplyMultiBulkLen(c,2);
+            addReplyString(c,OBJ_SHARED_0STR,sizeof(OBJ_SHARED_0STR)-1);
+            if (server.cluster->failing_nodes_count > 0) {
+                addReplyString(c, OBJ_SHARED_INCONSISTENT, sizeof(OBJ_SHARED_INCONSISTENT)-1);
+            } else {
+                addReplyString(c, OBJ_SHARED_CONSISTENT, sizeof(OBJ_SHARED_CONSISTENT)-1);
+            }
+        }
+        return;
+    }
+
+    /* Do we need to recalculate the cached response? */
+    if (cntr->rlen == 0) {
+        counterCacheResponse(cntr);
     }
     
     if (c->argc == 2) {
-        addReplyLongDouble(c, value);
+        addReplyString(c,cntr->rbuf,cntr->rlen);
     } else if (!strcasecmp(c->argv[2]->ptr,"state")) {
         addReplyMultiBulkLen(c,2);
-        addReplyLongDouble(c, value);
+        addReplyString(c,cntr->rbuf,cntr->rlen);
         if (server.cluster->failing_nodes_count > 0) {
-            addReplyString(c, "$12\r\nINCONSISTENT\r\n", sizeof("$12\r\nINCONSISTENT\r\n")-1);
+            addReplyString(c, OBJ_SHARED_INCONSISTENT, sizeof(OBJ_SHARED_INCONSISTENT)-1);
         } else {
-            addReplyString(c, "$10\r\nCONSISTENT\r\n", sizeof("$10\r\nCONSISTENT\r\n")-1);
+            addReplyString(c, OBJ_SHARED_CONSISTENT, sizeof(OBJ_SHARED_CONSISTENT)-1);
         }
     } else {
         addReplyErrorFormat(c, "Unknown GET option '%s'",
@@ -300,7 +340,8 @@ void setCommand(client *c) {
 
     cntr->value = value;
     server.dirty++;
-    addReplyLongDouble(c, cntr->value);
+    counterCacheResponse(cntr);
+    addReplyString(c,cntr->rbuf,cntr->rlen);
 }
 
 void precisionCommand(client *c) {
