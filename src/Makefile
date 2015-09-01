@@ -219,9 +219,6 @@ noopt:
 valgrind:
 	$(MAKE) OPTIMIZATION="-O0" MALLOC="libc"
 
-src/help.h:
-	@../utils/generate-command-help.rb > help.h
-
 install: all
 	@mkdir -p $(INSTALL_BIN)
 	$(DISCNT_INSTALL) $(DISCNT_SERVER_NAME) $(INSTALL_BIN)

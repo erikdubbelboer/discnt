@@ -74,16 +74,11 @@ static struct config {
     int monitor_mode;
     int latency_mode;
     int latency_history;
-    int cluster_mode;
-    int cluster_reissue_command;
     int pipe_mode;
     int pipe_timeout;
     int stat_mode;
-    int scan_mode;
     int intrinsic_latency_mode;
     int intrinsic_latency_duration;
-    char *pattern;
-    int bigkeys;
     int stdinarg; /* get last arg from stdin. (-x option) */
     char *auth;
     int output; /* output mode, see OUTPUT_* defines */
@@ -488,7 +483,6 @@ static int cliReadReply(int output_raw_strings) {
     void *_reply;
     redisReply *reply;
     sds out = NULL;
-    int output = 1;
 
     if (redisGetReply(context,&_reply) != REDIS_OK) {
         if (config.shutdown) {
@@ -513,53 +507,21 @@ static int cliReadReply(int output_raw_strings) {
 
     config.last_cmd_type = reply->type;
 
-    /* Check if we need to connect to a different node and reissue the
-     * request. */
-    if (config.cluster_mode && reply->type == REDIS_REPLY_ERROR &&
-        (!strncmp(reply->str,"MOVED",5) || !strcmp(reply->str,"ASK")))
-    {
-        char *p = reply->str, *s;
-        int slot;
-
-        output = 0;
-        /* Comments show the position of the pointer as:
-         *
-         * [S] for pointer 's'
-         * [P] for pointer 'p'
-         */
-        s = strchr(p,' ');      /* MOVED[S]3999 127.0.0.1:6381 */
-        p = strchr(s+1,' ');    /* MOVED[S]3999[P]127.0.0.1:6381 */
-        *p = '\0';
-        slot = atoi(s+1);
-        s = strchr(p+1,':');    /* MOVED 3999[P]127.0.0.1[S]6381 */
-        *s = '\0';
-        sdsfree(config.hostip);
-        config.hostip = sdsnew(p+1);
-        config.hostport = atoi(s+1);
-        if (config.interactive)
-            printf("-> Redirected to slot [%d] located at %s:%d\n",
-                slot, config.hostip, config.hostport);
-        config.cluster_reissue_command = 1;
-        cliRefreshPrompt();
-    }
-
-    if (output) {
-        if (output_raw_strings) {
+    if (output_raw_strings) {
+        out = cliFormatReplyRaw(reply);
+    } else {
+        if (config.output == OUTPUT_RAW) {
             out = cliFormatReplyRaw(reply);
-        } else {
-            if (config.output == OUTPUT_RAW) {
-                out = cliFormatReplyRaw(reply);
-                out = sdscat(out,"\n");
-            } else if (config.output == OUTPUT_STANDARD) {
-                out = cliFormatReplyTTY(reply,"");
-            } else if (config.output == OUTPUT_CSV) {
-                out = cliFormatReplyCSV(reply);
-                out = sdscat(out,"\n");
-            }
+            out = sdscat(out,"\n");
+        } else if (config.output == OUTPUT_STANDARD) {
+            out = cliFormatReplyTTY(reply,"");
+        } else if (config.output == OUTPUT_CSV) {
+            out = cliFormatReplyCSV(reply);
+            out = sdscat(out,"\n");
         }
-        fwrite(out,sdslen(out),1,stdout);
-        sdsfree(out);
     }
+    fwrite(out,sdslen(out),1,stdout);
+    sdsfree(out);
     freeReplyObject(reply);
     return REDIS_OK;
 }
@@ -691,10 +653,6 @@ static int parseOptions(int argc, char **argv) {
             config.latency_history = 1;
         } else if (!strcmp(argv[i],"--stat")) {
             config.stat_mode = 1;
-        } else if (!strcmp(argv[i],"--scan")) {
-            config.scan_mode = 1;
-        } else if (!strcmp(argv[i],"--pattern") && !lastarg) {
-            config.pattern = argv[++i];
         } else if (!strcmp(argv[i],"--intrinsic-latency") && !lastarg) {
             config.intrinsic_latency_mode = 1;
             config.intrinsic_latency_duration = atoi(argv[++i]);
@@ -702,12 +660,8 @@ static int parseOptions(int argc, char **argv) {
             config.pipe_mode = 1;
         } else if (!strcmp(argv[i],"--pipe-timeout") && !lastarg) {
             config.pipe_timeout = atoi(argv[++i]);
-        } else if (!strcmp(argv[i],"--bigkeys")) {
-            config.bigkeys = 1;
         } else if (!strcmp(argv[i],"--eval") && !lastarg) {
             config.eval = argv[++i];
-        } else if (!strcmp(argv[i],"-c")) {
-            config.cluster_mode = 1;
         } else if (!strcmp(argv[i],"-d") && !lastarg) {
             sdsfree(config.mb_delim);
             config.mb_delim = sdsnew(argv[++i]);
@@ -763,7 +717,6 @@ static void usage(void) {
 "                     It is possible to specify sub-second times like -i 0.1.\n"
 "  -x                 Read last argument from STDIN.\n"
 "  -d <delimiter>     Multi-bulk delimiter in for raw formatting (default: \\n).\n"
-"  -c                 Enable cluster mode (follow -ASK and -MOVED redirections).\n"
 "  --raw              Use raw formatting for replies (default when STDOUT is\n"
 "                     not a tty).\n"
 "  --no-raw           Force formatted output even when STDOUT is not a tty.\n"
@@ -775,9 +728,6 @@ static void usage(void) {
 "  --pipe-timeout <n> In --pipe mode, abort with error if after sending all data.\n"
 "                     no reply is received within <n> seconds.\n"
 "                     Default timeout: %d. Use 0 to wait forever.\n"
-"  --bigkeys          Sample Discnt keys looking for big keys.\n"
-"  --scan             List all keys using the SCAN command.\n"
-"  --pattern <pat>    Useful with --scan to specify a SCAN pattern.\n"
 "  --intrinsic-latency <sec> Run a test to measure intrinsic system latency.\n"
 "                     The test will run for the specified amount of seconds.\n"
 "  --eval <file>      Send an EVAL command using the Lua script at <file>.\n"
@@ -790,7 +740,6 @@ static void usage(void) {
 "  discnt -r 100 lpush mylist x\n"
 "  discnt -r 100 -i 1 info | grep used_memory_human:\n"
 "  discnt --eval myscript.lua key1 key2 , arg1 arg2 arg3\n"
-"  discnt --scan --pattern '*:12345*'\n"
 "\n"
 "  (Note: when using --eval the comma separates KEYS[] from ARGV[] items)\n"
 "\n"
@@ -869,26 +818,18 @@ static void repl(void) {
                         repeat = 1;
                     }
 
-                    while (1) {
-                        config.cluster_reissue_command = 0;
+                    if (cliSendCommand(argc-skipargs,argv+skipargs,repeat)
+                        != REDIS_OK)
+                    {
+                        cliConnect(1);
+
+                        /* If we still cannot send the command print error.
+                         * We'll try to reconnect the next time. */
                         if (cliSendCommand(argc-skipargs,argv+skipargs,repeat)
                             != REDIS_OK)
-                        {
-                            cliConnect(1);
-
-                            /* If we still cannot send the command print error.
-                             * We'll try to reconnect the next time. */
-                            if (cliSendCommand(argc-skipargs,argv+skipargs,repeat)
-                                != REDIS_OK)
-                                cliPrintContextError();
-                        }
-                        /* Issue the command again if we got redirected in cluster mode */
-                        if (config.cluster_mode && config.cluster_reissue_command) {
-                            cliConnect(1);
-                        } else {
-                            break;
-                        }
+                            cliPrintContextError();
                     }
+
                     elapsed = mstime()-start_time;
                     if (elapsed >= 500) {
                         printf("(%.2fs)\n",(double)elapsed/1000);
@@ -1163,284 +1104,6 @@ static void pipeMode(void) {
 }
 
 /*------------------------------------------------------------------------------
- * Find big keys
- *--------------------------------------------------------------------------- */
-
-#define TYPE_STRING 0
-#define TYPE_LIST   1
-#define TYPE_SET    2
-#define TYPE_HASH   3
-#define TYPE_ZSET   4
-#define TYPE_NONE   5
-
-static redisReply *sendScan(unsigned long long *it) {
-    redisReply *reply = redisCommand(context, "SCAN %llu", *it);
-
-    /* Handle any error conditions */
-    if(reply == NULL) {
-        fprintf(stderr, "\nI/O error\n");
-        exit(1);
-    } else if(reply->type == REDIS_REPLY_ERROR) {
-        fprintf(stderr, "SCAN error: %s\n", reply->str);
-        exit(1);
-    } else if(reply->type != REDIS_REPLY_ARRAY) {
-        fprintf(stderr, "Non ARRAY response from SCAN!\n");
-        exit(1);
-    } else if(reply->elements != 2) {
-        fprintf(stderr, "Invalid element count from SCAN!\n");
-        exit(1);
-    }
-
-    /* Validate our types are correct */
-    assert(reply->element[0]->type == REDIS_REPLY_STRING);
-    assert(reply->element[1]->type == REDIS_REPLY_ARRAY);
-
-    /* Update iterator */
-    *it = atoi(reply->element[0]->str);
-
-    return reply;
-}
-
-static int getDbSize(void) {
-    redisReply *reply;
-    int size;
-
-    reply = redisCommand(context, "DBSIZE");
-
-    if(reply == NULL || reply->type != REDIS_REPLY_INTEGER) {
-        fprintf(stderr, "Couldn't determine DBSIZE!\n");
-        exit(1);
-    }
-
-    /* Grab the number of keys and free our reply */
-    size = reply->integer;
-    freeReplyObject(reply);
-
-    return size;
-}
-
-static int toIntType(char *key, char *type) {
-    if(!strcmp(type, "string")) {
-        return TYPE_STRING;
-    } else if(!strcmp(type, "list")) {
-        return TYPE_LIST;
-    } else if(!strcmp(type, "set")) {
-        return TYPE_SET;
-    } else if(!strcmp(type, "hash")) {
-        return TYPE_HASH;
-    } else if(!strcmp(type, "zset")) {
-        return TYPE_ZSET;
-    } else if(!strcmp(type, "none")) {
-        return TYPE_NONE;
-    } else {
-        fprintf(stderr, "Unknown type '%s' for key '%s'\n", type, key);
-        exit(1);
-    }
-}
-
-static void getKeyTypes(redisReply *keys, int *types) {
-    redisReply *reply;
-    unsigned int i;
-
-    /* Pipeline TYPE commands */
-    for(i=0;i<keys->elements;i++) {
-        redisAppendCommand(context, "TYPE %s", keys->element[i]->str);
-    }
-
-    /* Retrieve types */
-    for(i=0;i<keys->elements;i++) {
-        if(redisGetReply(context, (void**)&reply)!=REDIS_OK) {
-            fprintf(stderr, "Error getting type for key '%s' (%d: %s)\n",
-                keys->element[i]->str, context->err, context->errstr);
-            exit(1);
-        } else if(reply->type != REDIS_REPLY_STATUS) {
-            fprintf(stderr, "Invalid reply type (%d) for TYPE on key '%s'!\n",
-                reply->type, keys->element[i]->str);
-            exit(1);
-        }
-
-        types[i] = toIntType(keys->element[i]->str, reply->str);
-        freeReplyObject(reply);
-    }
-}
-
-static void getKeySizes(redisReply *keys, int *types,
-                        unsigned long long *sizes)
-{
-    redisReply *reply;
-    char *sizecmds[] = {"STRLEN","LLEN","SCARD","HLEN","ZCARD"};
-    unsigned int i;
-
-    /* Pipeline size commands */
-    for(i=0;i<keys->elements;i++) {
-        /* Skip keys that were deleted */
-        if(types[i]==TYPE_NONE)
-            continue;
-
-        redisAppendCommand(context, "%s %s", sizecmds[types[i]],
-            keys->element[i]->str);
-    }
-
-    /* Retreive sizes */
-    for(i=0;i<keys->elements;i++) {
-        /* Skip keys that dissapeared between SCAN and TYPE */
-        if(types[i] == TYPE_NONE) {
-            sizes[i] = 0;
-            continue;
-        }
-
-        /* Retreive size */
-        if(redisGetReply(context, (void**)&reply)!=REDIS_OK) {
-            fprintf(stderr, "Error getting size for key '%s' (%d: %s)\n",
-                keys->element[i]->str, context->err, context->errstr);
-            exit(1);
-        } else if(reply->type != REDIS_REPLY_INTEGER) {
-            /* Theoretically the key could have been removed and
-             * added as a different type between TYPE and SIZE */
-            fprintf(stderr,
-                "Warning:  %s on '%s' failed (may have changed type)\n",
-                 sizecmds[types[i]], keys->element[i]->str);
-            sizes[i] = 0;
-        } else {
-            sizes[i] = reply->integer;
-        }
-
-        freeReplyObject(reply);
-    }
-}
-
-static void findBigKeys(void) {
-    unsigned long long biggest[5] = {0}, counts[5] = {0}, totalsize[5] = {0};
-    unsigned long long sampled = 0, total_keys, totlen=0, *sizes=NULL, it=0;
-    sds maxkeys[5] = {0};
-    char *typename[] = {"string","list","set","hash","zset"};
-    char *typeunit[] = {"bytes","items","members","fields","members"};
-    redisReply *reply, *keys;
-    unsigned int arrsize=0, i;
-    int type, *types=NULL;
-    double pct;
-
-    /* Total keys pre scanning */
-    total_keys = getDbSize();
-
-    /* Status message */
-    printf("\n# Scanning the entire keyspace to find biggest keys as well as\n");
-    printf("# average sizes per key type.  You can use -i 0.1 to sleep 0.1 sec\n");
-    printf("# per 100 SCAN commands (not usually needed).\n\n");
-
-    /* New up sds strings to keep track of overall biggest per type */
-    for(i=0;i<TYPE_NONE; i++) {
-        maxkeys[i] = sdsempty();
-        if(!maxkeys[i]) {
-            fprintf(stderr, "Failed to allocate memory for largest key names!\n");
-            exit(1);
-        }
-    }
-
-    /* SCAN loop */
-    do {
-        /* Calculate approximate percentage completion */
-        pct = 100 * (double)sampled/total_keys;
-
-        /* Grab some keys and point to the keys array */
-        reply = sendScan(&it);
-        keys  = reply->element[1];
-
-        /* Reallocate our type and size array if we need to */
-        if(keys->elements > arrsize) {
-            types = zrealloc(types, sizeof(int)*keys->elements);
-            sizes = zrealloc(sizes, sizeof(unsigned long long)*keys->elements);
-
-            if(!types || !sizes) {
-                fprintf(stderr, "Failed to allocate storage for keys!\n");
-                exit(1);
-            }
-
-            arrsize = keys->elements;
-        }
-
-        /* Retreive types and then sizes */
-        getKeyTypes(keys, types);
-        getKeySizes(keys, types, sizes);
-
-        /* Now update our stats */
-        for(i=0;i<keys->elements;i++) {
-            if((type = types[i]) == TYPE_NONE)
-                continue;
-
-            totalsize[type] += sizes[i];
-            counts[type]++;
-            totlen += keys->element[i]->len;
-            sampled++;
-
-            if(biggest[type]<sizes[i]) {
-                printf(
-                   "[%05.2f%%] Biggest %-6s found so far '%s' with %llu %s\n",
-                   pct, typename[type], keys->element[i]->str, sizes[i],
-                   typeunit[type]);
-
-                /* Keep track of biggest key name for this type */
-                maxkeys[type] = sdscpy(maxkeys[type], keys->element[i]->str);
-                if(!maxkeys[type]) {
-                    fprintf(stderr, "Failed to allocate memory for key!\n");
-                    exit(1);
-                }
-
-                /* Keep track of the biggest size for this type */
-                biggest[type] = sizes[i];
-            }
-
-            /* Update overall progress */
-            if(sampled % 1000000 == 0) {
-                printf("[%05.2f%%] Sampled %llu keys so far\n", pct, sampled);
-            }
-        }
-
-        /* Sleep if we've been directed to do so */
-        if(sampled && (sampled %100) == 0 && config.interval) {
-            usleep(config.interval);
-        }
-
-        freeReplyObject(reply);
-    } while(it != 0);
-
-    if(types) zfree(types);
-    if(sizes) zfree(sizes);
-
-    /* We're done */
-    printf("\n-------- summary -------\n\n");
-
-    printf("Sampled %llu keys in the keyspace!\n", sampled);
-    printf("Total key length in bytes is %llu (avg len %.2f)\n\n",
-       totlen, totlen ? (double)totlen/sampled : 0);
-
-    /* Output the biggest keys we found, for types we did find */
-    for(i=0;i<TYPE_NONE;i++) {
-        if(sdslen(maxkeys[i])>0) {
-            printf("Biggest %6s found '%s' has %llu %s\n", typename[i], maxkeys[i],
-               biggest[i], typeunit[i]);
-        }
-    }
-
-    printf("\n");
-
-    for(i=0;i<TYPE_NONE;i++) {
-        printf("%llu %ss with %llu %s (%05.2f%% of keys, avg size %.2f)\n",
-           counts[i], typename[i], totalsize[i], typeunit[i],
-           sampled ? 100 * (double)counts[i]/sampled : 0,
-           counts[i] ? (double)totalsize[i]/counts[i] : 0);
-    }
-
-    /* Free sds strings containing max keys */
-    for(i=0;i<TYPE_NONE;i++) {
-        sdsfree(maxkeys[i]);
-    }
-
-    /* Success! */
-    exit(0);
-}
-
-/*------------------------------------------------------------------------------
  * Stats mode
  *--------------------------------------------------------------------------- */
 
@@ -1574,39 +1237,6 @@ static void statMode(void) {
 }
 
 /*------------------------------------------------------------------------------
- * Scan mode
- *--------------------------------------------------------------------------- */
-
-static void scanMode(void) {
-    redisReply *reply;
-    unsigned long long cur = 0;
-
-    do {
-        if (config.pattern)
-            reply = redisCommand(context,"SCAN %llu MATCH %s",
-                cur,config.pattern);
-        else
-            reply = redisCommand(context,"SCAN %llu",cur);
-        if (reply == NULL) {
-            printf("I/O error\n");
-            exit(1);
-        } else if (reply->type == REDIS_REPLY_ERROR) {
-            printf("ERROR: %s\n", reply->str);
-            exit(1);
-        } else {
-            unsigned int j;
-
-            cur = strtoull(reply->element[0]->str,NULL,10);
-            for (j = 0; j < reply->element[1]->elements; j++)
-                printf("%s\n", reply->element[1]->element[j]->str);
-        }
-        freeReplyObject(reply);
-    } while(cur != 0);
-
-    exit(0);
-}
-
-/*------------------------------------------------------------------------------
  * Intrisic latency mode.
  *
  * Measure max latency of a running process that does not result from
@@ -1696,14 +1326,10 @@ int main(int argc, char **argv) {
     config.monitor_mode = 0;
     config.latency_mode = 0;
     config.latency_history = 0;
-    config.cluster_mode = 0;
     config.stat_mode = 0;
-    config.scan_mode = 0;
     config.intrinsic_latency_mode = 0;
-    config.pattern = NULL;
     config.pipe_mode = 0;
     config.pipe_timeout = DISCNT_CLI_DEFAULT_PIPE_TIMEOUT;
-    config.bigkeys = 0;
     config.stdinarg = 0;
     config.auth = NULL;
     config.eval = NULL;
@@ -1734,23 +1360,11 @@ int main(int argc, char **argv) {
         pipeMode();
     }
 
-    /* Find big keys */
-    if (config.bigkeys) {
-        if (cliConnect(0) == REDIS_ERR) exit(1);
-        findBigKeys();
-    }
-
     /* Stat mode */
     if (config.stat_mode) {
         if (cliConnect(0) == REDIS_ERR) exit(1);
         if (config.interval == 0) config.interval = 1000000;
         statMode();
-    }
-
-    /* Scan mode */
-    if (config.scan_mode) {
-        if (cliConnect(0) == REDIS_ERR) exit(1);
-        scanMode();
     }
 
     /* Intrinsic latency mode */
