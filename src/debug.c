@@ -156,6 +156,10 @@ void debugCommand(client *c) {
     } else if (!strcasecmp(c->argv[1]->ptr,"flushall")) {
         flushServerData();
         addReply(c,shared.ok);
+    } else if (!strcasecmp(c->argv[1]->ptr,"reset") && c->argc == 2) {
+        clusterBroadcastResetMessage();
+        flushServerData();
+        addReply(c,shared.ok);
     } else if (!strcasecmp(c->argv[1]->ptr,"digest") && c->argc == 2) {
         unsigned char digest[20];
         sds d = sdsempty();

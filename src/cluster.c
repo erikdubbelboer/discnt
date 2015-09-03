@@ -1087,6 +1087,10 @@ int clusterProcessPacket(clusterLink *link) {
                   sizeof(hdr->data.ack.about.name);
         explen += intrev16ifbe(hdr->data.ack.about.name_length);
         if (totlen != explen) return 1;
+    } else if (type == CLUSTERMSG_TYPE_RESET) {
+        uint32_t explen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
+        explen += sizeof(clusterMsgDataReset);
+        if (totlen != explen) return 1;
     }
 
     /* Check if the sender is a known node. */
@@ -1252,6 +1256,9 @@ int clusterProcessPacket(clusterLink *link) {
         if (!sender) return 1;
 
         cluserReadAck(&hdr->data.ack.about, sender);
+    } else if (type == CLUSTERMSG_TYPE_RESET) {
+        serverLog(LL_WARNING,"Received RESET from %.40s",sender->name);
+        flushServerData();
     } else {
         serverLog(LL_WARNING,"Received unknown packet type: %d", type);
     }
@@ -1416,6 +1423,9 @@ void clusterBuildMessageHdr(clusterMsg *hdr, int type) {
     if (type == CLUSTERMSG_TYPE_FAIL) {
         totlen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
         totlen += sizeof(clusterMsgDataFail);
+    } else if (type == CLUSTERMSG_TYPE_RESET) {
+        totlen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
+        totlen += sizeof(clusterMsgDataReset);
     }
     hdr->totlen = htonl(totlen);
     /* For PING, PONG, MEET and COUNTER, fixing the totlen field is up to the caller. */
@@ -2257,3 +2267,10 @@ void cluserReadAck(const clusterMsgDataAck *msg, clusterNode *node) {
     sdsfree(name);
 }
 
+void clusterBroadcastResetMessage(void) {
+    unsigned char buf[sizeof(clusterMsg)];
+    clusterMsg *hdr = (clusterMsg*) buf;
+
+    clusterBuildMessageHdr(hdr,CLUSTERMSG_TYPE_RESET);
+    clusterBroadcastMessage(server.cluster->nodes,buf,ntohl(hdr->totlen));
+}

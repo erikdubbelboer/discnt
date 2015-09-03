@@ -128,6 +128,7 @@ typedef struct clusterState {
 #define CLUSTERMSG_TYPE_FAIL 3     /* Mark node xxx as failing. */
 #define CLUSTERMSG_TYPE_COUNTER 4  /* A counter. */
 #define CLUSTERMSG_TYPE_ACK 5      /* Ack. */
+#define CLUSTERMSG_TYPE_RESET 6    /* Reset. */
 
 /* Initially we don't know our "name", but we'll find it once we connect
  * to the first node, using the getsockname() function. Then we'll use this
@@ -166,6 +167,10 @@ typedef struct {
     unsigned char name[2]; /* Defined as 2 bytes just for alignment. */
 } clusterMsgDataAck;
 
+typedef struct {
+    uint32_t notused1;
+} clusterMsgDataReset;
+
 union clusterMsgData {
     /* PING, MEET and PONG. */
     struct {
@@ -187,6 +192,11 @@ union clusterMsgData {
     struct {
         clusterMsgDataAck about;
     } ack;
+
+    /* RESET. */
+    struct {
+        clusterMsgDataReset ignored;
+    } reset;
 };
 
 #define CLUSTER_PROTO_VER 0 /* Cluster bus protocol version. */
@@ -222,5 +232,6 @@ struct counter;
 
 void clusterSendShardToNode(struct counter* cntr, clusterNode *node);
 void clusterSendShard(struct counter* cntr); /* To all nodes. */
+void clusterBroadcastResetMessage(void);
 
 #endif /* __DISCNT_CLUSTER_H */
