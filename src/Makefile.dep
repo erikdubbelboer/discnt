@@ -1,58 +1,77 @@
-adlist.o: adlist.c adlist.h zmalloc.h
-ae.o: ae.c ae.h zmalloc.h config.h ae_kqueue.c
+adlist.o: adlist.c adlist.h zmalloc.h \
+ ../deps/jemalloc/include/jemalloc/jemalloc.h
+ae.o: ae.c ae.h zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h \
+ config.h ae_epoll.c
+ae_epoll.o: ae_epoll.c
+ae_evport.o: ae_evport.c
 ae_kqueue.o: ae_kqueue.c
 ae_select.o: ae_select.c
 anet.o: anet.c fmacros.h anet.h
 bio.o: bio.c server.h fmacros.h config.h ae.h sds.h dict.h adlist.h \
-  zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h rio.h \
-  bio.h
+ zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h version.h \
+ util.h latency.h sparkline.h ddb.h rio.h bio.h
 blocked.o: blocked.c server.h fmacros.h config.h ae.h sds.h dict.h \
-  adlist.h zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h \
-  rio.h
+ adlist.h zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h \
+ version.h util.h latency.h sparkline.h ddb.h rio.h
 cluster.o: cluster.c server.h fmacros.h config.h ae.h sds.h dict.h \
-  adlist.h zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h \
-  rio.h cluster.h endianconv.h counter.h
+ adlist.h zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h \
+ version.h util.h latency.h sparkline.h ddb.h rio.h cluster.h \
+ endianconv.h counter.h
 config.o: config.c server.h fmacros.h config.h ae.h sds.h dict.h adlist.h \
-  zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h rio.h \
-  cluster.h
+ zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h version.h \
+ util.h latency.h sparkline.h ddb.h rio.h cluster.h
 counter.o: counter.c server.h fmacros.h config.h ae.h sds.h dict.h \
-  adlist.h zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h \
-  rio.h counter.h cluster.h endianconv.h
+ adlist.h zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h \
+ version.h util.h latency.h sparkline.h ddb.h rio.h counter.h cluster.h \
+ endianconv.h
 crc64.o: crc64.c
 ddb.o: ddb.c server.h fmacros.h config.h ae.h sds.h dict.h adlist.h \
-  zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h rio.h \
-  endianconv.h counter.h cluster.h
+ zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h version.h \
+ util.h latency.h sparkline.h ddb.h rio.h endianconv.h counter.h \
+ cluster.h
 debug.o: debug.c server.h fmacros.h config.h ae.h sds.h dict.h adlist.h \
-  zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h rio.h \
-  sha1.h crc64.h counter.h cluster.h bio.h
-dict.o: dict.c fmacros.h dict.h zmalloc.h discntassert.h
+ zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h version.h \
+ util.h latency.h sparkline.h ddb.h rio.h sha1.h crc64.h counter.h \
+ cluster.h bio.h
+dict.o: dict.c fmacros.h dict.h zmalloc.h \
+ ../deps/jemalloc/include/jemalloc/jemalloc.h discntassert.h
 discnt-benchmark.o: discnt-benchmark.c fmacros.h sds.h ae.h \
-  ../deps/hiredis/hiredis.h adlist.h zmalloc.h
+ ../deps/hiredis/hiredis.h adlist.h zmalloc.h \
+ ../deps/jemalloc/include/jemalloc/jemalloc.h
 discnt-cli.o: discnt-cli.c fmacros.h version.h ../deps/hiredis/hiredis.h \
-  sds.h zmalloc.h ../deps/linenoise/linenoise.h help.h anet.h ae.h
+ sds.h zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h \
+ ../deps/linenoise/linenoise.h help.h anet.h ae.h
 endianconv.o: endianconv.c
 latency.o: latency.c server.h fmacros.h config.h ae.h sds.h dict.h \
-  adlist.h zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h \
-  rio.h
+ adlist.h zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h \
+ version.h util.h latency.h sparkline.h ddb.h rio.h
 memtest.o: memtest.c config.h
 networking.o: networking.c server.h fmacros.h config.h ae.h sds.h dict.h \
-  adlist.h zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h \
-  rio.h
+ adlist.h zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h \
+ version.h util.h latency.h sparkline.h ddb.h rio.h
 object.o: object.c server.h fmacros.h config.h ae.h sds.h dict.h adlist.h \
-  zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h rio.h
+ zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h version.h \
+ util.h latency.h sparkline.h ddb.h rio.h
+pubsub.o: pubsub.c server.h fmacros.h config.h ae.h sds.h dict.h adlist.h \
+ zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h version.h \
+ util.h latency.h sparkline.h ddb.h rio.h counter.h cluster.h
 release.o: release.c release.h version.h crc64.h
 rio.o: rio.c fmacros.h rio.h sds.h util.h crc64.h config.h server.h ae.h \
-  dict.h adlist.h zmalloc.h anet.h version.h latency.h sparkline.h ddb.h
-sds.o: sds.c sds.h sdsalloc.h zmalloc.h
+ dict.h adlist.h zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h \
+ anet.h version.h latency.h sparkline.h ddb.h
+sds.o: sds.c sds.h sdsalloc.h zmalloc.h \
+ ../deps/jemalloc/include/jemalloc/jemalloc.h
 server.o: server.c server.h fmacros.h config.h ae.h sds.h dict.h adlist.h \
-  zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h rio.h \
-  cluster.h bio.h asciilogo.h
+ zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h version.h \
+ util.h latency.h sparkline.h ddb.h rio.h cluster.h bio.h asciilogo.h
 setproctitle.o: setproctitle.c
 sha1.o: sha1.c solarisfixes.h sha1.h config.h
 sparkline.o: sparkline.c server.h fmacros.h config.h ae.h sds.h dict.h \
-  adlist.h zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h \
-  rio.h
+ adlist.h zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h \
+ version.h util.h latency.h sparkline.h ddb.h rio.h
 syncio.o: syncio.c server.h fmacros.h config.h ae.h sds.h dict.h adlist.h \
-  zmalloc.h anet.h version.h util.h latency.h sparkline.h ddb.h rio.h
+ zmalloc.h ../deps/jemalloc/include/jemalloc/jemalloc.h anet.h version.h \
+ util.h latency.h sparkline.h ddb.h rio.h
 util.o: util.c fmacros.h util.h sds.h sha1.h
-zmalloc.o: zmalloc.c config.h zmalloc.h
+zmalloc.o: zmalloc.c config.h zmalloc.h \
+ ../deps/jemalloc/include/jemalloc/jemalloc.h

@@ -68,6 +68,9 @@ typedef struct counter {
     /* Cached output buffer. */
     char rbuf[128];
     int rlen;
+
+    long double lastvalue;
+    list *subscribers; /* Map of clients subscribed to this counter. */
 } counter;
 
 

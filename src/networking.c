@@ -105,6 +105,7 @@ client *createClient(int fd) {
     listSetFreeMethod(c->reply,decrRefCountVoid);
     listSetDupMethod(c->reply,dupClientReplyValue);
     c->btype = BLOCKED_NONE;
+    c->sub_counters = NULL;
     c->peerid = NULL;
     if (fd != -1) listAddNodeTail(server.clients,c);
     return c;
@@ -642,6 +643,12 @@ void freeClient(client *c) {
 
     /* Deallocate structures used to block on blocking ops. */
     if (c->flags & CLIENT_BLOCKED) unblockClient(c);
+
+    if (c->sub_counters != NULL) {
+      pubsubUnsubscribeAllCounters(c,0);
+      dictRelease(c->sub_counters);
+      c->sub_counters = NULL;
+    }
 
     /* Close socket, unregister events, and remove list of replies and
      * accumulated arguments. */
@@ -1195,7 +1202,7 @@ sds catClientInfoString(sds s, client *client) {
     if (emask & AE_WRITABLE) *p++ = 'w';
     *p = '\0';
     return sdscatfmt(s,
-        "id=%U addr=%s fd=%i name=%s age=%I idle=%I flags=%s qbuf=%U qbuf-free=%U obl=%U oll=%U omem=%U events=%s cmd=%s",
+        "id=%U addr=%s fd=%i name=%s age=%I idle=%I flags=%s sub=%i qbuf=%U qbuf-free=%U obl=%U oll=%U omem=%U events=%s cmd=%s",
         (unsigned long long) client->id,
         getClientPeerId(client),
         client->fd,
@@ -1203,6 +1210,7 @@ sds catClientInfoString(sds s, client *client) {
         (long long)(server.unixtime - client->ctime),
         (long long)(server.unixtime - client->lastinteraction),
         flags,
+        client->sub_counters ? (int) dictSize(client->sub_counters) : 0,
         (unsigned long long) sdslen(client->querybuf),
         (unsigned long long) sdsavail(client->querybuf),
         (unsigned long long) client->bufpos,
@@ -1442,20 +1450,23 @@ unsigned long getClientOutputBufferMemoryUsage(client *c) {
  *
  * The function will return one of the following:
  * CLIENT_TYPE_NORMAL -> Normal client
+ * CLIENT_TYPE_PUBSUB -> Client subscribed to counters
  */
 int getClientType(client *c) {
-    UNUSED(c);
+    if (c->flags & CLIENT_PUBSUB) return CLIENT_TYPE_PUBSUB;
     return CLIENT_TYPE_NORMAL;
 }
 
 int getClientTypeByName(char *name) {
-    if (!strcasecmp(name,"normal")) return CLIENT_TYPE_NORMAL;
+    if (!strcasecmp(name,"pubsub")) return CLIENT_TYPE_PUBSUB;
+    else if (!strcasecmp(name,"normal")) return CLIENT_TYPE_NORMAL;
     else return -1;
 }
 
 char *getClientTypeName(int class) {
     switch(class) {
     case CLIENT_TYPE_NORMAL: return "normal";
+    case CLIENT_TYPE_PUBSUB: return "pubsub";
     default:                        return NULL;
     }
 }

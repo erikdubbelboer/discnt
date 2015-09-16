@@ -213,6 +213,24 @@ void countersUpdateValues(void) {
     dictReleaseIterator(it);
 }
 
+void counterPubSub(counter *cntr) {
+    listNode *ln;
+    listIter li;
+
+    if (cntr->subscribers == NULL)
+        return;
+
+    listRewind(cntr->subscribers,&li);
+    while ((ln = listNext(&li)) != NULL) {
+        client *c = listNodeValue(ln);
+
+        addReply(c,shared.mbulkhdr[3]);
+        addReply(c,shared.messagebulk);
+        addReplyBulkCBuffer(c,cntr->name,sdslen(cntr->name));
+        addReplyLongDouble(c, cntr->value);
+    }
+}
+
 /* -----------------------------------------------------------------------------
  * Counter related commands
  * -------------------------------------------------------------------------- */
@@ -481,6 +499,11 @@ void countersCron(void) {
         counter *cntr;
 
         cntr = dictGetVal(de);
+
+        if (cntr->value != cntr->lastvalue) {
+            counterPubSub(cntr);
+            cntr->lastvalue = cntr->value;
+        }
 
         if (cntr->myshard == NULL) {
             continue;

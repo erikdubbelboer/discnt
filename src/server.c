@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2014-2015, Erik Dubbelboer <erik at dubbelboer dot com>
  * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
+ * Copyright (c) 2015, Erik Dubbelboer <erik at dubbelboer dot com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -99,6 +100,7 @@ struct discntServer server; /* server global state */
  * r: read command  (will never modify data).
  * m: may increase memory usage once called. Don't allow if out of memory.
  * a: admin command, like SAVE or SHUTDOWN.
+ * p: Pub/Sub related command.
  * l: Allow command while loading the database.
  * M: Do not automatically propagate the command on MONITOR.
  * F: Fast command: O(1) or O(log(N)) command that should never delay
@@ -133,6 +135,8 @@ struct serverCommand serverCommandTable[] = {
     {"keys",keysCommand,2,"r",0,NULL,0,0,0,0,0},
     {"precision",precisionCommand,-2,"wmF",0,NULL,0,0,0,0,0},
     {"set",setCommand,3,"wmF",0,NULL,0,0,0,0,0},
+    {"subscribe",subscribeCommand,-2,"rpl",0,NULL,0,0,0,0,0},
+    {"unsubscribe",unsubscribeCommand,-1,"rpl",0,NULL,0,0,0,0,0},
 };
 
 /*============================ Utility functions ============================ */
@@ -437,6 +441,15 @@ dictType counterDictType = {
     dictCounterDestructor       /* val destructor */
 };
 
+dictType counterLookupDictType = {
+    dictSdsHash,                /* hash function */
+    NULL,                       /* key dup */
+    NULL,                       /* val dup */
+    dictSdsKeyCompare,          /* key compare */
+    NULL,                       /* key destructor */
+    NULL                        /* val destructor */
+};
+
 int htNeedsResize(dict *dict) {
     long long size, used;
 
@@ -520,6 +533,7 @@ int clientsCronHandleTimeout(client *c) {
 
     if (server.maxidletime &&
         !(c->flags & CLIENT_BLOCKED) &&  /* no timeout for blocked clients. */
+        !(c->flags & CLIENT_PUBSUB) &&   /* no timeout for Pub/Sub clients */
         (now - c->lastinteraction > server.maxidletime))
     {
         serverLog(LL_VERBOSE,"Closing idle client");
@@ -1235,6 +1249,7 @@ void populateCommandTable(void) {
             case 'r': c->flags |= CMD_READONLY; break;
             case 'm': c->flags |= CMD_DENYOOM; break;
             case 'a': c->flags |= CMD_ADMIN; break;
+            case 'p': c->flags |= CMD_PUBSUB; break;
             case 'l': c->flags |= CMD_LOADING; break;
             case 'M': c->flags |= CMD_SKIP_MONITOR; break;
             case 'F': c->flags |= CMD_FAST; break;
@@ -1416,6 +1431,15 @@ int processCommand(client *c) {
         return C_OK;
     }
 
+    /* Only allow SUBSCRIBE and UNSUBSCRIBE in the context of Pub/Sub */
+    if (c->flags & CLIENT_PUBSUB &&
+        c->cmd->proc != pingCommand &&
+        c->cmd->proc != subscribeCommand &&
+        c->cmd->proc != unsubscribeCommand) {
+        addReplyError(c,"only SUBSCRIBE / UNSUBSCRIBE / QUIT allowed in this context");
+        return C_OK;
+    }
+
     /* Loading DB? Return an error if the command has not the
      * CMD_LOADING flag. */
     if (server.loading && !(c->cmd->flags & CMD_LOADING)) {
@@ -1548,10 +1572,19 @@ void pingCommand(client *c) {
         return;
     }
 
-    if (c->argc == 1)
-        addReply(c,shared.pong);
-    else
-        addReplyBulk(c,c->argv[1]);
+    if (c->flags & CLIENT_PUBSUB) {
+        addReply(c,shared.mbulkhdr[2]);
+        addReplyBulkCBuffer(c,"pong",4);
+        if (c->argc == 1)
+            addReplyBulkCBuffer(c,"",0);
+        else
+            addReplyBulk(c,c->argv[1]);
+    } else {
+        if (c->argc == 1)
+            addReply(c,shared.pong);
+        else
+            addReplyBulk(c,c->argv[1]);
+    }
 }
 
 void echoCommand(client *c) {
@@ -1625,6 +1658,7 @@ void addReplyCommand(client *c, struct serverCommand *cmd) {
         flagcount += addReplyCommandFlag(c,cmd,CMD_READONLY, "readonly");
         flagcount += addReplyCommandFlag(c,cmd,CMD_DENYOOM, "denyoom");
         flagcount += addReplyCommandFlag(c,cmd,CMD_ADMIN, "admin");
+        flagcount += addReplyCommandFlag(c,cmd,CMD_PUBSUB, "pubsub");
         flagcount += addReplyCommandFlag(c,cmd,CMD_RANDOM, "random");
         flagcount += addReplyCommandFlag(c,cmd,CMD_LOADING, "loading");
         flagcount += addReplyCommandFlag(c,cmd,CMD_SKIP_MONITOR, "skip_monitor");

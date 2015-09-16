@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2014-2015, Erik Dubbelboer <erik at dubbelboer dot com>
  * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
+ * Copyright (c) 2015, Erik Dubbelboer <erik at dubbelboer dot com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -159,14 +160,15 @@ typedef long long mstime_t; /* millisecond time type. */
 
 /* Command flags. Please check the command table defined in the discnt.c file
  * for more information about the meaning of every flag. */
-#define CMD_WRITE        (1<<0)  /* "w" flag */
-#define CMD_READONLY     (1<<1)  /* "r" flag */
-#define CMD_DENYOOM      (1<<2)  /* "m" flag */
-#define CMD_ADMIN        (1<<3)  /* "a" flag */
-#define CMD_RANDOM       (1<<4)  /* "R" flag */
-#define CMD_LOADING      (1<<5)  /* "l" flag */
-#define CMD_SKIP_MONITOR (1<<6)  /* "M" flag */
-#define CMD_FAST         (1<<7)  /* "F" flag */
+#define CMD_WRITE        1     /* "w" flag */
+#define CMD_READONLY     2     /* "r" flag */
+#define CMD_DENYOOM      4     /* "m" flag */
+#define CMD_ADMIN        16    /* "a" flag */
+#define CMD_PUBSUB       32    /* "p" flag */
+#define CMD_RANDOM       128   /* "R" flag */
+#define CMD_LOADING      512   /* "l" flag */
+#define CMD_SKIP_MONITOR 2048  /* "M" flag */
+#define CMD_FAST         8192  /* "F" flag */
 
 /* Object types */
 #define OBJ_STRING 0
@@ -179,14 +181,15 @@ typedef long long mstime_t; /* millisecond time type. */
 #define OBJ_ENCODING_EMBSTR 2  /* Embedded sds string encoding */
 
 /* Client flags */
-#define CLIENT_MONITOR (1<<0) /* This client is a slave monitor, see MONITOR */
-#define CLIENT_BLOCKED (1<<1) /* The client is waiting in a blocking op. */
-#define CLIENT_CLOSE_AFTER_REPLY (1<<2) /* Close after writing entire reply. */
-#define CLIENT_UNBLOCKED (1<<3)   /* This client was unblocked and is stored in
+#define CLIENT_MONITOR (1<<2) /* This client is a slave monitor, see MONITOR */
+#define CLIENT_BLOCKED (1<<4) /* The client is waiting in a blocking op. */
+#define CLIENT_CLOSE_AFTER_REPLY (1<<6) /* Close after writing entire reply. */
+#define CLIENT_UNBLOCKED (1<<7)   /* This client was unblocked and is stored in
                                      server.unblocked_clients */
-#define CLIENT_CLOSE_ASAP (1<<4)  /* Close this client ASAP */
-#define CLIENT_UNIX_SOCKET (1<<5) /* Client connected via Unix domain socket */
-#define CLIENT_READONLY (1<<6)    /* Cluster client is in read-only state. */
+#define CLIENT_CLOSE_ASAP (1<<10)  /* Close this client ASAP */
+#define CLIENT_UNIX_SOCKET (1<<11) /* Client connected via Unix domain socket */
+#define CLIENT_READONLY (1<<17)    /* Cluster client is in read-only state. */
+#define CLIENT_PUBSUB (1<<18) /* Client is in Pub/Sub mode. */
 
 /* Client block type (btype field in client structure)
  * if CLIENT_BLOCKED flag is set. */
@@ -199,7 +202,8 @@ typedef long long mstime_t; /* millisecond time type. */
 /* Client classes for client limits, currently used only for
  * the max-client-output-buffer limit implementation. */
 #define CLIENT_TYPE_NORMAL 0 /* Normal req-reply clients + MONITORs */
-#define CLIENT_TYPE_COUNT 1
+#define CLIENT_TYPE_PUBSUB 1 /* Clients subscribed to PubSub channels. */
+#define CLIENT_TYPE_COUNT 2
 
 /* Log levels */
 #define LL_DEBUG 0
@@ -310,6 +314,7 @@ typedef struct client {
     int authenticated;      /* when requirepass is non-NULL */
     int btype;              /* Type of blocking op if CLIENT_BLOCKED. */
     blockingState bpop;     /* blocking state */
+    dict *sub_counters; 
     sds peerid;             /* Cached peer ID. */
 
     /* Response buffer */
@@ -579,10 +584,11 @@ extern dictType zsetDictType;
 extern dictType clusterNodesDictType;
 extern dictType clusterNodesBlackListDictType;
 extern dictType dbDictType;
-extern dictType shaScriptObjectDictType;
 extern double R_Zero, R_PosInf, R_NegInf, R_Nan;
 extern dictType hashDictType;
 extern dictType replScriptCacheDictType;
+extern dictType counterDictType;
+extern dictType counterLookupDictType;
 
 /*-----------------------------------------------------------------------------
  * Functions prototypes
@@ -736,6 +742,9 @@ void updateCachedTime(void);
 void resetServerStats(void);
 unsigned int getLRUClock(void);
 
+/* Pub / Sub */
+int pubsubUnsubscribeAllCounters(client *c, int notify);
+
 /* Configuration */
 void loadServerConfig(char *filename, char *options);
 void appendServerSaveParams(time_t seconds, int changes);
@@ -792,6 +801,8 @@ void getCommand(client *c);
 void keysCommand(client *c);
 void precisionCommand(client *c);
 void setCommand(client *c);
+void subscribeCommand(client *c);
+void unsubscribeCommand(client *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));

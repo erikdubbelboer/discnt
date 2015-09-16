@@ -18,6 +18,7 @@ set ::all_tests {
     unit/other
     unit/limits
     unit/counters
+    unit/pubsub
 }
 # Index to the next test to run in the ::all_tests list.
 set ::next_test 0
