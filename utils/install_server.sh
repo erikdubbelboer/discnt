@@ -42,6 +42,7 @@ SCRIPT=$(readlink -f $0)
 SCRIPTPATH=$(dirname $SCRIPT)
 
 #Initial defaults
+_DISCNT_USER=root
 _DISCNT_PORT=5262
 
 echo "Welcome to the discnt service installer"
@@ -52,6 +53,13 @@ echo
 if [ "$(id -u)" -ne 0 ] ; then
 	echo "You must run this script as root. Sorry!"
 	exit 1
+fi
+
+#Read the discnt user
+read  -p "Please select the user for this instance: [$_DISCNT_USER] " DISCNT_USER
+if [ -z "$DISCNT_USER" ] ; then
+	echo "Selecting default: $_DISCNT_USER"
+	DISCNT_USER=$_DISCNT_USER
 fi
 
 #Read the discnt port
@@ -106,6 +114,7 @@ fi
 
 echo "Selected config:"
 
+echo "User           : $DISCNT_USER"
 echo "Port           : $DISCNT_PORT"
 echo "Config file    : $DISCNT_CONFIG_FILE"
 echo "Log file       : $DISCNT_LOG_FILE"
@@ -118,6 +127,10 @@ read -p "Is this ok? Then press ENTER to go on or Ctrl-C to abort." _UNUSED_
 mkdir -p `dirname "$DISCNT_CONFIG_FILE"` || die "Could not create discnt config directory"
 mkdir -p `dirname "$DISCNT_LOG_FILE"` || die "Could not create discnt log dir"
 mkdir -p "$DISCNT_DATA_DIR" || die "Could not create discnt data directory"
+
+chown $DISCNT_USER "$DISCNT_DATA_DIR" || die "Could not chown discnt data directory"
+touch "$DISCNT_LOG_FILE" || die "Could not create discnt log file"
+chown $DISCNT_USER "$DISCNT_LOG_FILE" || die "Could not chown discnt log file"
 
 #render the templates
 TMP_FILE="/tmp/${DISCNT_PORT}.conf"
@@ -158,8 +171,9 @@ DISCNT_INIT_HEADER=\
 EXEC=$DISCNT_EXECUTABLE\n
 CLIEXEC=$CLI_EXEC\n
 PIDFILE=\"$PIDFILE\"\n
-CONF=\"$DISCNT_CONFIG_FILE\"\n\n
-DISCNTPORT=\"$DISCNT_PORT\"\n\n
+CONF=\"$DISCNT_CONFIG_FILE\"\n
+DISCNTPORT=\"$DISCNT_PORT\"\n
+DISCNTUSER=\"$DISCNT_USER\"\n\n
 ###############\n\n"
 
 DISCNT_CHKCONFIG_INFO=\
@@ -202,6 +216,8 @@ CLIEXEC=$CLI_EXEC
 PIDFILE=$PIDFILE
 CONF="$DISCNT_CONFIG_FILE"
 DISCNTPORT="$DISCNT_PORT"
+DISCNTUSER="$DISCNT_USER"
+
 ###############
 # SysV Init Information
 # chkconfig: - 58 74

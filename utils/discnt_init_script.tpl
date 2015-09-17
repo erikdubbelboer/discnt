@@ -6,7 +6,9 @@ case "$1" in
             echo "$PIDFILE exists, process is already running or crashed"
         else
             echo "Starting Discnt server..."
-            $EXEC $CONF
+            touch $PIDFILE
+            chown $DISCNTUSER $PIDFILE
+            sudo -u $DISCNTUSER $EXEC $CONF
         fi
         ;;
     stop)
@@ -22,6 +24,7 @@ case "$1" in
                 echo "Waiting for Discnt to shutdown ..."
                 sleep 1
             done
+            rm $PIDFILE
             echo "Discnt stopped"
         fi
         ;;
