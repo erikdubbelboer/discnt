@@ -371,6 +371,13 @@ typedef struct clientBufferLimitsConfig {
 
 extern clientBufferLimitsConfig clientBufferLimitsDefaults[CLIENT_TYPE_COUNT];
 
+typedef struct pubsub {
+    client* c;
+    long long seconds; /* Delay between messages */
+    mstime_t next;
+    long double lastvalue;
+} pubsub;
+
 /*-----------------------------------------------------------------------------
  * Global server state
  *----------------------------------------------------------------------------*/
@@ -743,6 +750,7 @@ void resetServerStats(void);
 unsigned int getLRUClock(void);
 
 /* Pub / Sub */
+int pubsubUnsubscribeCounter(client *c, sds name, int notify);
 int pubsubUnsubscribeAllCounters(client *c, int notify);
 
 /* Configuration */
@@ -802,6 +810,7 @@ void keysCommand(client *c);
 void precisionCommand(client *c);
 void setCommand(client *c);
 void subscribeCommand(client *c);
+void isubscribeCommand(client *c);
 void unsubscribeCommand(client *c);
 
 #if defined(__GNUC__)

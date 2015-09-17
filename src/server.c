@@ -136,6 +136,7 @@ struct serverCommand serverCommandTable[] = {
     {"precision",precisionCommand,-2,"wmF",0,NULL,0,0,0,0,0},
     {"set",setCommand,3,"wmF",0,NULL,0,0,0,0,0},
     {"subscribe",subscribeCommand,-2,"rpl",0,NULL,0,0,0,0,0},
+    {"isubscribe",isubscribeCommand,-3,"rpl",0,NULL,0,0,0,0,0},
     {"unsubscribe",unsubscribeCommand,-1,"rpl",0,NULL,0,0,0,0,0},
 };
 
@@ -1435,8 +1436,9 @@ int processCommand(client *c) {
     if (c->flags & CLIENT_PUBSUB &&
         c->cmd->proc != pingCommand &&
         c->cmd->proc != subscribeCommand &&
+        c->cmd->proc != isubscribeCommand &&
         c->cmd->proc != unsubscribeCommand) {
-        addReplyError(c,"only SUBSCRIBE / UNSUBSCRIBE / QUIT allowed in this context");
+        addReplyError(c,"only SUBSCRIBE / ISUBSCRIBE / UNSUBSCRIBE / QUIT allowed in this context");
         return C_OK;
     }
 

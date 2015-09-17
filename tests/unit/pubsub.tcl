@@ -32,6 +32,11 @@ start_server {tags {"pubsub"}} {
         __consume_subscribe_messages $client subscribe $counters
     }
 
+    proc isubscribe {client int counters} {
+        $client isubscribe $int {*}$counters
+        __consume_subscribe_messages $client subscribe $counters
+    }
+
     proc unsubscribe {client {counters {}}} {
         $client unsubscribe {*}$counters
         __consume_subscribe_messages $client unsubscribe $counters
@@ -60,18 +65,36 @@ start_server {tags {"pubsub"}} {
         assert_equal {1 2} [subscribe $rd1 {test1 test2}]
         r set test1 1
         r set test2 2
-        after 1100
         set v [lsort [list [$rd1 read] [$rd1 read]]]
         assert_equal {{message test1 1} {message test2 2}} $v
 
         # unsubscribe from one of the channels
         unsubscribe $rd1 {test1}
         r set test2 3
-        after 1100
         assert_equal {message test2 3} [$rd1 read]
 
         # unsubscribe from the remaining channel
         unsubscribe $rd1 {test2}
+
+        # clean up clients
+        $rd1 close
+    }
+
+    test "ISUBSCRIBE basics" {
+        set rd1 [redis_deferring_client]
+
+        assert_equal {1} [isubscribe $rd1 2 {test}]
+        r set test 1
+        assert_equal {message test 1} [$rd1 read]
+        r incr test
+        after 800
+        r incr test
+        after 800
+        r incr test
+        assert_equal {message test 4} [$rd1 read]
+
+        # unsubscribe from the remaining channel
+        unsubscribe $rd1 {test}
 
         # clean up clients
         $rd1 close

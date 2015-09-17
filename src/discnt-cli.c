@@ -557,6 +557,7 @@ static int cliSendCommand(int argc, char **argv, int repeat) {
     if (!strcasecmp(command,"shutdown")) config.shutdown = 1;
     if (!strcasecmp(command,"monitor")) config.monitor_mode = 1;
     if (!strcasecmp(command,"subscribe")) config.pubsub_mode = 1;
+    if (!strcasecmp(command,"isubscribe")) config.pubsub_mode = 1;
 
     /* Setup argument length */
     argvlen = malloc(argc*sizeof(size_t));

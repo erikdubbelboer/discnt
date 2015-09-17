@@ -33,8 +33,7 @@ in order to test if everything is working:
     127.0.0.1:7711> GET test
     0.1
 
-Remember that you can increment counters on different nodes as Discnt
-is multi master.
+Remember that you can increment counters on different nodes as Discnt is multi master.
 
 API
 ===

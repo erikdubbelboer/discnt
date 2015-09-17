@@ -37,9 +37,10 @@
 
 /* Subscribe a client to a counter. Returns 1 if the operation succeeded, or
  * 0 if the client was already subscribed to that counter. */
-int pubsubSubscribeCounter(client *c, sds name) {
+int pubsubSubscribeCounter(client *c, sds name, long long seconds) {
     int retval = 0;
     counter* cntr;
+    pubsub* p;
 
     cntr = counterLookup(name);
     if (cntr == NULL) {
@@ -56,7 +57,12 @@ int pubsubSubscribeCounter(client *c, sds name) {
         if (cntr->subscribers == NULL) {
             cntr->subscribers = listCreate();
         }
-        serverAssert(listAddNodeTail(cntr->subscribers,c) != NULL);
+        p = zmalloc(sizeof(pubsub));
+        p->c         = c;
+        p->seconds   = seconds;
+        p->next      = 0;
+        p->lastvalue = 0;
+        serverAssert(listAddNodeTail(cntr->subscribers,p) != NULL);
     }
     /* Notify the client */
     addReply(c,shared.mbulkhdr[3]);
@@ -70,6 +76,7 @@ int pubsubSubscribeCounter(client *c, sds name) {
  * 0 if the client was not subscribed to the specified counter. */
 int pubsubUnsubscribeCounter(client *c, sds name, int notify) {
     dictEntry *de;
+    listIter li;
     listNode *ln;
     int retval = 0;
     counter *cntr;
@@ -81,10 +88,16 @@ int pubsubUnsubscribeCounter(client *c, sds name, int notify) {
             retval = 1;
             cntr = dictGetVal(de);
             dictDelete(c->sub_counters,name);
-            /* Remove the client from the counter -> clients list hash table */
-            ln = listSearchKey(cntr->subscribers,c);
-            serverAssertWithInfo(c,NULL,ln != NULL);
-            listDelNode(cntr->subscribers,ln);
+
+            listRewind(cntr->subscribers,&li);
+            while ((ln = listNext(&li)) != NULL) {
+                pubsub *p = listNodeValue(ln);
+                if (p->c == c) {
+                    listDelNode(cntr->subscribers,ln);
+                    zfree(p);
+                    break;
+                }
+            }
             if (listLength(cntr->subscribers) == 0) {
                 listRelease(cntr->subscribers);
                 cntr->subscribers = NULL;
@@ -133,7 +146,19 @@ void subscribeCommand(client *c) {
     int j;
 
     for (j = 1; j < c->argc; j++)
-        pubsubSubscribeCounter(c,c->argv[j]->ptr);
+        pubsubSubscribeCounter(c,c->argv[j]->ptr, 1);
+    c->flags |= CLIENT_PUBSUB;
+}
+
+void isubscribeCommand(client *c) {
+    int j;
+    long long seconds;
+
+    if (getLongLongFromObjectOrReply(c, c->argv[1], &seconds, NULL) != C_OK)
+        return;
+
+    for (j = 2; j < c->argc; j++)
+        pubsubSubscribeCounter(c,c->argv[j]->ptr, seconds);
     c->flags |= CLIENT_PUBSUB;
 }
 

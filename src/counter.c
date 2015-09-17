@@ -88,7 +88,18 @@ void dictCounterDestructor(void *privdata, void *val) {
     listNode *ln;
     listIter li;
     counter *cntr = val;
+    pubsub *p;
 
+    /* Unsubscribe everyone */
+    if (cntr->subscribers != NULL) {
+        while (listLength(cntr->subscribers)) {
+            ln = listFirst(cntr->subscribers);
+            p  = listNodeValue(ln);
+            pubsubUnsubscribeCounter(p->c,cntr->name,1);
+        }
+    }
+
+    /* Free all shards */
     listRewind(cntr->shards,&li);
     while ((ln = listNext(&li)) != NULL) {
         shard *shrd = listNodeValue(ln);
@@ -213,7 +224,7 @@ void countersUpdateValues(void) {
     dictReleaseIterator(it);
 }
 
-void counterPubSub(counter *cntr) {
+void counterPubSub(counter *cntr, mstime_t now) {
     listNode *ln;
     listIter li;
 
@@ -222,12 +233,22 @@ void counterPubSub(counter *cntr) {
 
     listRewind(cntr->subscribers,&li);
     while ((ln = listNext(&li)) != NULL) {
-        client *c = listNodeValue(ln);
+        pubsub *p = listNodeValue(ln);
 
-        addReply(c,shared.mbulkhdr[3]);
-        addReply(c,shared.messagebulk);
-        addReplyBulkCBuffer(c,cntr->name,sdslen(cntr->name));
-        addReplyLongDouble(c, cntr->value);
+        if (p->next > now) {
+            continue;
+        }
+        if (p->lastvalue == cntr->value) {
+            continue;
+        }
+
+        addReply(p->c,shared.mbulkhdr[3]);
+        addReply(p->c,shared.messagebulk);
+        addReplyBulkCBuffer(p->c,cntr->name,sdslen(cntr->name));
+        addReplyLongDouble(p->c, cntr->value);
+
+        p->next      = now + p->seconds*1000;
+        p->lastvalue = cntr->value;
     }
 }
 
@@ -306,7 +327,7 @@ void getCommand(client *c) {
     if (cntr->rlen == 0) {
         counterCacheResponse(cntr);
     }
-    
+
     if (c->argc == 2) {
         addReplyString(c,cntr->rbuf,cntr->rlen);
     } else if (!strcasecmp(c->argv[2]->ptr,"state")) {
@@ -422,7 +443,7 @@ void keysCommand(client *c) {
 void countersClusterAddNode(clusterNode *node) {
     dictIterator *it;
     dictEntry *de;
-    
+
     if (nodeInHandshake(node)) return;
 
     it = dictGetIterator(server.counters);
@@ -500,10 +521,7 @@ void countersCron(void) {
 
         cntr = dictGetVal(de);
 
-        if (cntr->value != cntr->lastvalue) {
-            counterPubSub(cntr);
-            cntr->lastvalue = cntr->value;
-        }
+        counterPubSub(cntr, now);
 
         if (cntr->myshard == NULL) {
             continue;
