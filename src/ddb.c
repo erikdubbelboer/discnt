@@ -443,6 +443,13 @@ int ddbLoadCounter(rio *ddb) {
         }
     }
 
+    /* Update the history to have no change */
+    if (cntr->myshard != NULL) {
+        for (i = 0; i < server.history_size; i++) {
+            cntr->history[i] = cntr->myshard->value;
+        }
+    }
+
     sdsfree(name);
 
     return 0;

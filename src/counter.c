@@ -517,6 +517,7 @@ void countersCron(void) {
     it = dictGetIterator(server.counters);
     while ((de = dictNext(it)) != NULL) {
         long double rvalue, elapsed;
+        double diff;
         counter *cntr;
 
         cntr = dictGetVal(de);
@@ -530,8 +531,9 @@ void countersCron(void) {
         if (cntr->myshard->predict_time > 0) {
             elapsed = (now - cntr->myshard->predict_time);
             rvalue = cntr->myshard->predict_value + (elapsed * cntr->myshard->predict_change);
+            diff = fabs((double)(rvalue - cntr->myshard->value));
 
-            if (fabs((double)(rvalue - cntr->myshard->value)) <= cntr->precision) {
+            if (diff <= cntr->precision) {
                 /* It's still up to date, check if we need to resend our last prediction. */
                 counterMaybeResend(cntr);
 
@@ -545,6 +547,9 @@ void countersCron(void) {
                 counterUpdateHistory(cntr);
 
                 continue;
+            } else {
+                serverLog(LL_DEBUG,"Counter %s needs new prediction (%f <= %f)",
+                    cntr->name, diff, cntr->precision);
             }
         }
 
