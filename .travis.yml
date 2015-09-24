@@ -1,11 +1,18 @@
 language: c
 sudo: false
+os:
+  - linux
+  - osx
 addons:
   apt:
     packages:
       - tcl8.5
+before_script:
+  - if [ "$TRAVIS_OS_NAME" == "osx" ] ; then brew update; brew tap homebrew/dupes; brew install tcl-tk; fi
 cache:
   directories:
     - $HOME/.ccache
-install: make CC="ccache $CC"
+install: 
+  - if [ "$TRAVIS_OS_NAME" == "linux" ] ; then make CC="ccache $CC"; fi
+  - if [ "$TRAVIS_OS_NAME" == "osx" ] ; then make; fi
 script: make test
