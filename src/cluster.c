@@ -2211,6 +2211,8 @@ void clusterSendAck(clusterNode *node, uint32_t revision, const sds name) {
     clusterMsg *hdr = (clusterMsg*) buf;
     uint32_t totlen;
 
+    if (node->link == NULL) return;
+
     totlen = sizeof(clusterMsg)-sizeof(union clusterMsgData);
     totlen += sizeof(clusterMsgDataAck) - sizeof(hdr->data.ack.about.name);
     totlen += sdslen(name);
