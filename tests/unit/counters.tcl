@@ -16,8 +16,12 @@ start_server {tags {"counters"}} {
         r get doesnotexist
     } {0}
 
-    test {KEYS should return all counters} {
+    test {MGET} {
         r incr test2
+        r mget test doesnotexist test2
+    } {3 0 1}
+
+    test {KEYS should return all counters} {
         lsort [r keys *]
     } {test test2}
 

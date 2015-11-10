@@ -344,6 +344,27 @@ void getCommand(client *c) {
     }
 }
 
+void mgetCommand(client *c) {
+    counter *cntr;
+    int j;
+
+    addReplyMultiBulkLen(c,c->argc-1);
+    for (j = 1; j < c->argc; j++) {
+        cntr = counterLookup(c->argv[j]->ptr);
+
+        if (cntr == NULL) {
+            addReplyString(c,OBJ_SHARED_0STR,sizeof(OBJ_SHARED_0STR)-1);
+        } else {
+            /* Do we need to recalculate the cached response? */
+            if (cntr->rlen == 0) {
+                counterCacheResponse(cntr);
+            }
+
+            addReplyString(c,cntr->rbuf,cntr->rlen);
+        }
+    }
+}
+
 void setCommand(client *c) {
     counter *cntr;
     long double value;
