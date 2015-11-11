@@ -58,10 +58,10 @@ If the optional STATE is specified GET returns a multi reply containing the valu
 INCONSISTENT depending on the cluster state.
 
     PRECISION counter_name [value]
-Set or get the precision for the local counter. See [Predictions](http://discnt.io#predictions).
+Set or get the precision for the local counter. See [Predictions](http://discnt.io/#predictions).
 
 
-For more see [discnt.io#api](http://discnt.io#api)
+For more see [discnt.io/api.html](http://discnt.io/api.html)
 
 
 Client libraries
@@ -84,7 +84,7 @@ Who created Discnt?
 
 Discnt is a side project of Erik Dubbelboer.
 
-What does Discnt means?
+What does Discnt mean?
 ---
 
 DIStributed CouNTers.
