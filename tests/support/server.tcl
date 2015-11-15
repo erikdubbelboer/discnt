@@ -205,6 +205,8 @@ proc start_server {options {code undefined}} {
 
     if {$::valgrind} {
         exec valgrind --suppressions=src/valgrind.sup --show-reachable=no --show-possibly-lost=no --leak-check=full src/discnt-server $config_file > $stdout 2> $stderr &
+    } elseif ($::stack_logging) {
+        set pid [exec /usr/bin/env MallocStackLogging=1 MallocLogFile=/tmp/malloc_log.txt src/discnt-server $config_file > $stdout 2> $stderr &]
     } else {
         exec src/discnt-server $config_file > $stdout 2> $stderr &
     }

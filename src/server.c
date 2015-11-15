@@ -46,12 +46,14 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/uio.h>
+#include <sys/un.h>
 #include <limits.h>
 #include <float.h>
 #include <math.h>
 #include <sys/resource.h>
 #include <sys/utsname.h>
 #include <locale.h>
+#include <sys/socket.h>
 
 /* Our shared "common" objects */
 
@@ -787,6 +789,9 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
     /* Try to process pending commands for clients that were just unblocked. */
     if (listLength(server.unblocked_clients))
         processUnblockedClients();
+
+    /* Handle writes with pending output buffers. */
+    handleClientsWithPendingWrites();
 }
 
 /* =========================== Server initialization ======================== */
@@ -870,6 +875,7 @@ void initServerConfig(void) {
 
     getRandomHexChars(server.runid,CONFIG_RUN_ID_SIZE);
     server.configfile = NULL;
+    server.executable = NULL;
     server.hz = CONFIG_DEFAULT_HZ;
     server.runid[CONFIG_RUN_ID_SIZE] = '\0';
     server.arch_bits = (sizeof(long) == 8) ? 64 : 32;
@@ -892,6 +898,8 @@ void initServerConfig(void) {
     server.syslog_ident = zstrdup(CONFIG_DEFAULT_SYSLOG_IDENT);
     server.syslog_facility = LOG_LOCAL0;
     server.daemonize = CONFIG_DEFAULT_DAEMONIZE;
+    server.supervised = 0;
+    server.supervised_mode = SUPERVISED_NONE;
     server.pidfile = zstrdup(CONFIG_DEFAULT_PID_FILE);
     server.ddb_filename = zstrdup(CONFIG_DEFAULT_DDB_FILENAME);
     server.requirepass = NULL;
@@ -946,6 +954,53 @@ void initServerConfig(void) {
     server.assert_line = 0;
     server.bug_report_start = 0;
     server.watchdog_period = 0;
+}
+
+extern char **environ;
+
+/* Restart the server, executing the same executable that started this
+ * instance, with the same arguments and configuration file.
+ *
+ * The function is designed to directly call execve() so that the new
+ * server instance will retain the PID of the previous one.
+ *
+ * The list of flags, that may be bitwise ORed together, alter the
+ * behavior of this function:
+ *
+ * RESTART_SERVER_NONE              No flags.
+ * RESTART_SERVER_GRACEFULLY        Do a proper shutdown before restarting.
+ * RESTART_SERVER_CONFIG_REWRITE    Rewrite the config file before restarting.
+ *
+ * On success the function does not return, because the process turns into
+ * a different process. On error C_ERR is returned. */
+int restartServer(int flags, mstime_t delay) {
+    int j;
+
+    /* Check if we still have accesses to the executable that started this
+     * server instance. */
+    if (access(server.executable,X_OK) == -1) return C_ERR;
+
+    /* Config rewriting. */
+    if (flags & RESTART_SERVER_CONFIG_REWRITE &&
+        server.configfile &&
+        rewriteConfig(server.configfile) == -1) return C_ERR;
+
+    /* Perform a proper shutdown. */
+    if (flags & RESTART_SERVER_GRACEFULLY &&
+        prepareForShutdown(SHUTDOWN_NOFLAGS) != C_OK) return C_ERR;
+
+    /* Close all file descriptors, with the exception of stdin, stdout, strerr
+     * which are useful if we restart a Discnt server which is not daemonized. */
+    for (j = 3; j < (int)server.maxclients + 1024; j++) close(j);
+
+    /* Execute the server with the original command line. */
+    if (delay) usleep(delay*1000);
+    execve(server.executable,server.exec_argv,environ);
+
+    /* If an error occurred here, there is nothing we can do, but exit. */
+    _exit(1);
+
+    return C_ERR; /* Never reached. */
 }
 
 /* This function will try to raise the max number of open files accordingly to
@@ -1152,6 +1207,7 @@ void initServer(void) {
     server.clients = listCreate();
     server.clients_to_close = listCreate();
     server.monitors = listCreate();
+    server.clients_pending_write = listCreate();
     server.unblocked_clients = listCreate();
     server.ready_keys = listCreate();
     server.clients_paused = 0;
@@ -1347,7 +1403,43 @@ void replicationFeedMonitors(client *c, list *monitors, robj **argv, int argc) {
     decrRefCount(cmdobj);
 }
 
-/* Call() is the core of Discnt execution of a command */
+/* Call() is the core of Discnt execution of a command.
+ *
+ * The following flags can be passed:
+ * CMD_CALL_NONE        No flags.
+ * CMD_CALL_SLOWLOG     Check command speed and log in the slow log if needed.
+ * CMD_CALL_STATS       Populate command stats.
+ * CMD_CALL_PROPAGATE_AOF   Append command to AOF if it modified the dataset
+ *                          or if the client flags are forcing propagation.
+ * CMD_CALL_PROPAGATE_REPL  Send command to salves if it modified the dataset
+ *                          or if the client flags are forcing propagation.
+ * CMD_CALL_PROPAGATE   Alias for PROPAGATE_AOF|PROPAGATE_REPL.
+ * CMD_CALL_FULL        Alias for SLOWLOG|STATS|PROPAGATE.
+ *
+ * The exact propagation behavior depends on the client flags.
+ * Specifically:
+ *
+ * 1. If the client flags CLIENT_FORCE_AOF or CLIENT_FORCE_REPL are set
+ *    and assuming the corresponding CMD_CALL_PROPAGATE_AOF/REPL is set
+ *    in the call flags, then the command is propagated even if the
+ *    dataset was not affected by the command.
+ * 2. If the client flags CLIENT_PREVENT_REPL_PROP or CLIENT_PREVENT_AOF_PROP
+ *    are set, the propagation into AOF or to slaves is not performed even
+ *    if the command modified the dataset.
+ *
+ * Note that regardless of the client flags, if CMD_CALL_PROPAGATE_AOF
+ * or CMD_CALL_PROPAGATE_REPL are not set, then respectively AOF or
+ * slaves propagation will never occur.
+ *
+ * Client flags are modified by the implementation of a given command
+ * using the following API:
+ *
+ * forceCommandPropagation(client *c, int flags);
+ * preventCommandPropagation(client *c);
+ * preventCommandAOF(client *c);
+ * preventCommandReplication(client *c);
+ *
+ */
 void call(client *c, int flags) {
     long long start, duration;
 
@@ -1359,6 +1451,8 @@ void call(client *c, int flags) {
     {
         replicationFeedMonitors(c,server.monitors,c->argv,c->argc);
     }
+
+    c->flags &= ~(CLIENT_PREVENT_PROP);
 
     /* Call the command. */
     start = ustime();
@@ -1491,7 +1585,7 @@ int prepareForShutdown(int flags) {
         if (ddbSave(server.ddb_filename) != C_OK) {
             /* Ooops.. error saving! The best we can do is to continue
              * operating. Note that if there was a background saving process,
-             * in the next cron() Redis will be notified that the background
+             * in the next cron() Discnt will be notified that the background
              * saving aborted, handling special stuff like slaves pending for
              * synchronization... */
             serverLog(LL_WARNING,"Error trying to save the DB, can't exit.");
@@ -1779,6 +1873,7 @@ sds genDiscntInfoString(char *section) {
             "uptime_in_seconds:%jd\r\n"
             "uptime_in_days:%jd\r\n"
             "hz:%d\r\n"
+            "executable:%s\r\n"
             "config_file:%s\r\n",
             DISCNT_VERSION,
             discntGitSHA1(),
@@ -1798,6 +1893,7 @@ sds genDiscntInfoString(char *section) {
             (intmax_t)uptime,
             (intmax_t)(uptime/(3600*24)),
             server.hz,
+            server.executable ? server.executable : "",
             server.configfile ? server.configfile : "");
     }
 
@@ -2203,8 +2299,106 @@ void serverSetProcTitle(char *title) {
 #endif
 }
 
+
+/*
+ * Check whether systemd or upstart have been used to start Discnt.
+ */
+
+int serverSupervisedUpstart(void) {
+    const char *upstart_job = getenv("UPSTART_JOB");
+
+    if (!upstart_job) {
+        serverLog(LL_WARNING,
+                "upstart supervision requested, but UPSTART_JOB not found");
+        return 0;
+    }
+
+    serverLog(LL_NOTICE, "supervised by upstart, will stop to signal readyness");
+    raise(SIGSTOP);
+    unsetenv("UPSTART_JOB");
+    return 1;
+}
+
+int serverSupervisedSystemd(void) {
+    const char *notify_socket = getenv("NOTIFY_SOCKET");
+    int fd = 1;
+    struct sockaddr_un su;
+    struct iovec iov;
+    struct msghdr hdr;
+    int sendto_flags = 0;
+
+    if (!notify_socket) {
+        serverLog(LL_WARNING,
+                "systemd supervision requested, but NOTIFY_SOCKET not found");
+        return 0;
+    }
+
+    if ((strchr("@/", notify_socket[0])) == NULL || strlen(notify_socket) < 2) {
+        return 0;
+    }
+
+    serverLog(LL_NOTICE, "supervised by systemd, will signal readyness");
+    if ((fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == -1) {
+        serverLog(LL_WARNING,
+                "Can't connect to systemd socket %s", notify_socket);
+        return 0;
+    }
+
+    memset(&su, 0, sizeof(su));
+    su.sun_family = AF_UNIX;
+    strncpy (su.sun_path, notify_socket, sizeof(su.sun_path) -1);
+    su.sun_path[sizeof(su.sun_path) - 1] = '\0';
+
+    if (notify_socket[0] == '@')
+        su.sun_path[0] = '\0';
+
+    memset(&iov, 0, sizeof(iov));
+    iov.iov_base = "READY=1";
+    iov.iov_len = strlen("READY=1");
+
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.msg_name = &su;
+    hdr.msg_namelen = offsetof(struct sockaddr_un, sun_path) +
+        strlen(notify_socket);
+    hdr.msg_iov = &iov;
+    hdr.msg_iovlen = 1;
+
+    unsetenv("NOTIFY_SOCKET");
+#ifdef HAVE_MSG_NOSIGNAL
+    sendto_flags |= MSG_NOSIGNAL;
+#endif
+    if (sendmsg(fd, &hdr, sendto_flags) < 0) {
+        serverLog(LL_WARNING, "Can't send notification to systemd");
+        close(fd);
+        return 0;
+    }
+    close(fd);
+    return 1;
+}
+
+int serverIsSupervised(int mode) {
+    if (mode == SUPERVISED_AUTODETECT) {
+        const char *upstart_job = getenv("UPSTART_JOB");
+        const char *notify_socket = getenv("NOTIFY_SOCKET");
+
+        if (upstart_job) {
+            serverSupervisedUpstart();
+        } else if (notify_socket) {
+            serverSupervisedSystemd();
+        }
+    } else if (mode == SUPERVISED_UPSTART) {
+        return serverSupervisedUpstart();
+    } else if (mode == SUPERVISED_SYSTEMD) {
+        return serverSupervisedSystemd();
+    }
+
+    return 0;
+}
+
+
 int main(int argc, char **argv) {
     struct timeval tv;
+    int j;
 
     /* We need to initialize our libraries, and the server configuration. */
 #ifdef INIT_SETPROCTITLE_REPLACEMENT
@@ -2218,8 +2412,15 @@ int main(int argc, char **argv) {
     dictSetHashFunctionSeed(tv.tv_sec^tv.tv_usec^getpid());
     initServerConfig();
 
+    /* Store the executable path and arguments in a safe place in order
+     * to be able to restart the server later. */
+    server.executable = getAbsolutePath(argv[0]);
+    server.exec_argv = zmalloc(sizeof(char*)*(argc+1));
+    server.exec_argv[argc] = NULL;
+    for (j = 0; j < argc; j++) server.exec_argv[j] = zstrdup(argv[j]);
+
     if (argc >= 2) {
-        int j = 1; /* First option to parse in argv[] */
+        j = 1; /* First option to parse in argv[] */
         sds options = sdsempty();
         char *configfile = NULL;
 
@@ -2240,8 +2441,15 @@ int main(int argc, char **argv) {
         }
 
         /* First argument is the config file name? */
-        if (argv[j][0] != '-' || argv[j][1] != '-')
-            configfile = argv[j++];
+        if (argv[j][0] != '-' || argv[j][1] != '-') {
+            configfile = argv[j];
+            server.configfile = getAbsolutePath(configfile);
+            /* Replace the config file in server.exec_argv with
+             * its absoulte path. */
+            zfree(server.exec_argv[j]);
+            server.exec_argv[j] = zstrdup(server.configfile);
+            j++;
+        }
         /* All the other options are parsed and conceptually appended to the
          * configuration file. For instance --port 6380 will generate the
          * string "port 6380\n" to be parsed after the actual file name
@@ -2259,15 +2467,18 @@ int main(int argc, char **argv) {
             }
             j++;
         }
-        if (configfile) server.configfile = getAbsolutePath(configfile);
         loadServerConfig(configfile,options);
         sdsfree(options);
     } else {
         serverLog(LL_WARNING, "Warning: no config file specified, using the default config. In order to specify a config file use %s /path/to/discnt.conf", argv[0]);
     }
-    if (server.daemonize) daemonize();
+
+    server.supervised = serverIsSupervised(server.supervised_mode);
+    int background = server.daemonize && !server.supervised;
+    if (background) daemonize();
+
     initServer();
-    if (server.daemonize) createPidFile();
+    if (background || server.pidfile) createPidFile();
     serverSetProcTitle(argv[0]);
     discntAsciiArt();
 

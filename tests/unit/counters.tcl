@@ -46,4 +46,10 @@ start_server {tags {"counters"}} {
     test {GET aftet SET} {
         r get test
     } {1}
+
+    test {Test counters for correct float representation} {
+        assert {[r incrbyfloat test3 1.23] eq {1.23}}
+        assert {[r incrbyfloat test3 0.77] eq {2}}
+        assert {[r incrbyfloat test3 -0.1] eq {1.9}}
+    }
 }

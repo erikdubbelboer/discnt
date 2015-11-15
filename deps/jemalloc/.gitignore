@@ -1,16 +1,21 @@
 /*.gcov.*
 
-/autom4te.cache/
-
+/bin/jemalloc-config
 /bin/jemalloc.sh
+/bin/jeprof
 
 /config.stamp
 /config.log
 /config.status
+/configure
 
 /doc/html.xsl
 /doc/manpages.xsl
 /doc/jemalloc.xml
+/doc/jemalloc.html
+/doc/jemalloc.3
+
+/jemalloc.pc
 
 /lib/
 
@@ -32,6 +37,7 @@
 /include/jemalloc/jemalloc_protos.h
 /include/jemalloc/jemalloc_protos_jet.h
 /include/jemalloc/jemalloc_rename.h
+/include/jemalloc/jemalloc_typedefs.h
 
 /src/*.[od]
 /src/*.gcda
@@ -65,3 +71,5 @@ test/include/test/jemalloc_test_defs.h
 /test/unit/*.gcda
 /test/unit/*.gcno
 /test/unit/*.out
+
+/VERSION

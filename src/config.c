@@ -66,6 +66,14 @@ configEnum loglevel_enum[] = {
     {NULL,0}
 };
 
+configEnum supervised_mode_enum[] = {
+    {"upstart", SUPERVISED_UPSTART},
+    {"systemd", SUPERVISED_SYSTEMD},
+    {"auto", SUPERVISED_AUTODETECT},
+    {"no", SUPERVISED_NONE},
+    {NULL, 0}
+};
+
 /* Output buffer limits presets. */
 clientBufferLimitsConfig clientBufferLimitsDefaults[CLIENT_TYPE_COUNT] = {
     {0, 0, 0} /* normal */
@@ -362,6 +370,15 @@ void loadServerConfigFromString(char *config) {
                    argc == 2) {
             if ((server.stop_writes_on_bgsave_err = yesnotoi(argv[1])) == -1) {
                 err = "argument must be 'yes' or 'no'"; goto loaderr;
+            }
+        } else if (!strcasecmp(argv[0],"supervised") && argc == 2) {
+            server.supervised_mode =
+                configEnumGetValue(supervised_mode_enum,argv[1]);
+
+            if (server.supervised_mode == INT_MIN) {
+                err = "Invalid option for 'supervised'. "
+                    "Allowed values: 'upstart', 'systemd', 'auto', or 'no'";
+                goto loaderr;
             }
         } else {
             err = "Bad directive or wrong number of arguments"; goto loaderr;
@@ -725,6 +742,8 @@ void configGetCommand(client *c) {
     /* Enum values */
     config_get_enum_field("loglevel",
             server.verbosity,loglevel_enum);
+    config_get_enum_field("supervised",
+            server.supervised_mode,supervised_mode_enum);
     config_get_enum_field("syslog-facility",
             server.syslog_facility,syslog_facility_enum);
 
@@ -1334,6 +1353,7 @@ int rewriteConfig(char *path) {
     rewriteConfigYesNoOption(state,"activerehashing",server.activerehashing,CONFIG_DEFAULT_ACTIVE_REHASHING);
     rewriteConfigClientoutputbufferlimitOption(state);
     rewriteConfigNumericalOption(state,"hz",server.hz,CONFIG_DEFAULT_HZ);
+    rewriteConfigEnumOption(state,"supervised",server.supervised_mode,supervised_mode_enum,SUPERVISED_NONE);
 
     /* Step 3: remove all the orphaned lines in the old file, that is, lines
      * that were used by a config option and are no longer used, like in case

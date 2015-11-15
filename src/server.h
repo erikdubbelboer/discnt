@@ -34,10 +34,7 @@
 
 #include "fmacros.h"
 #include "config.h"
-
-#if defined(__sun)
 #include "solarisfixes.h"
-#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,6 +48,7 @@
 #include <syslog.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <stddef.h>
 
 typedef long long mstime_t; /* millisecond time type. */
 
@@ -190,6 +188,12 @@ typedef long long mstime_t; /* millisecond time type. */
 #define CLIENT_UNIX_SOCKET (1<<11) /* Client connected via Unix domain socket */
 #define CLIENT_READONLY (1<<17)    /* Cluster client is in read-only state. */
 #define CLIENT_PUBSUB (1<<18) /* Client is in Pub/Sub mode. */
+#define CLIENT_PREVENT_PROP (1<<19)  /* Don't propagate to AOF / Slaves. */
+#define CLIENT_PENDING_WRITE (1<<20) /* Client has output to send but a write
+                                        handler is yet not installed. */
+#define CLIENT_REPLY_OFF (1<<21)   /* Don't send replies to client. */
+#define CLIENT_REPLY_SKIP_NEXT (1<<22)  /* Set CLIENT_REPLY_SKIP for next cmd */
+#define CLIENT_REPLY_SKIP (1<<23)  /* Don't send just this reply. */
 
 /* Client block type (btype field in client structure)
  * if CLIENT_BLOCKED flag is set. */
@@ -212,6 +216,12 @@ typedef long long mstime_t; /* millisecond time type. */
 #define LL_WARNING 3
 #define LL_RAW (1<<10) /* Modifier to log without timestamp */
 #define CONFIG_DEFAULT_VERBOSITY LL_NOTICE
+
+/* Supervision options */
+#define SUPERVISED_NONE 0
+#define SUPERVISED_AUTODETECT 1
+#define SUPERVISED_SYSTEMD 2
+#define SUPERVISED_UPSTART 3
 
 /* Anti-warning macro... */
 #define UNUSED(V) ((void) V)
@@ -304,8 +314,8 @@ typedef struct client {
     int multibulklen;       /* number of multi bulk arguments left to read */
     long bulklen;           /* length of bulk argument in multi bulk request */
     list *reply;
-    unsigned long reply_bytes; /* Tot bytes of objects in reply list */
-    int sentlen;            /* Amount of bytes already sent in the current
+    size_t reply_bytes;     /* Tot bytes of objects in reply list */
+    size_t sentlen;         /* Amount of bytes already sent in the current
                                buffer or object being sent. */
     time_t ctime;           /* Client creation time */
     time_t lastinteraction; /* time of the last interaction, used for timeout */
@@ -394,6 +404,8 @@ struct discntServer {
     /* General */
     pid_t pid;                  /* Main process pid. */
     char *configfile;           /* Absolute config file path, or NULL */
+    char *executable;           /* Absolute executable file path. */
+    char **exec_argv;           /* Executable argv vector (copy). */
     int hz;                     /* serverCron() calls frequency in hertz */
     dict *commands;             /* Command table */
     dict *orig_commands;        /* Command table before command renaming. */
@@ -420,6 +432,7 @@ struct discntServer {
     int cfd_count;              /* Used slots in cfd[] */
     list *clients;              /* List of active clients */
     list *clients_to_close;     /* Clients to close asynchronously */
+    list *clients_pending_write; /* There is to write or install handler. */
     list *monitors;             /* List of MONITORs */
     client *current_client; /* Current client, only used on crash report */
     int clients_paused;         /* True if clients are currently paused */
@@ -462,6 +475,8 @@ struct discntServer {
     int tcpkeepalive;               /* Set SO_KEEPALIVE if non-zero. */
     int active_expire_enabled;      /* Can be disabled for testing purposes. */
     size_t client_max_querybuf_len; /* Limit for client query buffer length */
+    int supervised;                 /* 1 if supervised, 0 otherwise. */
+    int supervised_mode;            /* See SUPERVISED_* */
     int daemonize;                  /* True if running as a daemon */
     clientBufferLimitsConfig client_obuf_limits[CLIENT_TYPE_COUNT];
     /* Logging */
@@ -518,9 +533,7 @@ struct discntServer {
 };
 
 typedef void serverCommandProc(client *c);
-
-typedef int *redisGetKeysProc(struct serverCommand *cmd, robj **argv, int argc, int *numkeys);
-
+typedef int *serverGetKeysProc(struct serverCommand *cmd, robj **argv, int argc, int *numkeys);
 struct serverCommand {
     char *name;
     serverCommandProc *proc;
@@ -529,17 +542,12 @@ struct serverCommand {
     int flags;    /* The actual flags, obtained from the 'sflags' field. */
     /* Use a function to determine keys arguments in a command line.
      * Used for Discnt Cluster redirect. */
-    redisGetKeysProc *getkeys_proc;
+    serverGetKeysProc *getkeys_proc;
     /* What keys should be loaded in background when calling this command? */
     int firstkey; /* The first argument that's a key (0 = no keys) */
     int lastkey;  /* The last argument that's a key */
     int keystep;  /* The step between first and last key */
     long long microseconds, calls;
-};
-
-struct redisFunctionSym {
-    char *name;
-    unsigned long pointer;
 };
 
 /* Structure to hold list iteration abstraction. */
@@ -608,7 +616,6 @@ mstime_t randomTimeError(mstime_t milliseconds);
 void getRandomHexChars(char *p, unsigned int len);
 uint64_t crc64(uint64_t crc, const unsigned char *s, uint64_t l);
 void exitFromChild(int retcode);
-size_t redisPopcount(void *s, long count);
 void serverSetProcTitle(char *title);
 
 /* networking.c -- Networking and Client related operations */
@@ -650,6 +657,7 @@ sds catClientInfoString(sds s, client *client);
 sds getAllClientsInfoString(void);
 void rewriteClientCommandVector(client *c, int argc, ...);
 void rewriteClientCommandArgument(client *c, int i, robj *newval);
+void replaceClientCommandVector(client *c, int argc, robj **argv);
 unsigned long getClientOutputBufferMemoryUsage(client *c);
 void freeClientsInAsyncFreeQueue(void);
 void asyncCloseClientOnOutputBufferLimitReached(client *c);
@@ -662,6 +670,9 @@ int listenToPort(int port, int *fds, int *count);
 void pauseClients(mstime_t duration);
 int clientsArePaused(void);
 int processEventsWhileBlocked(void);
+int handleClientsWithPendingWrites(void);
+int clientHasPendingReplies(client *c);
+void unlinkClient(client *c);
 
 #ifdef __GNUC__
 void addReplyErrorFormat(client *c, const char *fmt, ...)
@@ -748,6 +759,11 @@ void closeListeningSockets(int unlink_unix_socket);
 void updateCachedTime(void);
 void resetServerStats(void);
 unsigned int getLRUClock(void);
+
+#define RESTART_SERVER_NONE 0
+#define RESTART_SERVER_GRACEFULLY (1<<0)     /* Do proper shutdown. */
+#define RESTART_SERVER_CONFIG_REWRITE (1<<1) /* CONFIG REWRITE before restart.*/
+int restartServer(int flags, mstime_t delay);
 
 /* Pub / Sub */
 int pubsubUnsubscribeCounter(client *c, sds name, int notify);
