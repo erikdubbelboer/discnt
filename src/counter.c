@@ -34,15 +34,16 @@
 #include <math.h>
 
 
-void counterUpdateHistory(counter *cntr) {
+void counterHistoryUpdate(counter *cntr) {
     cntr->history[server.history_index] = cntr->myshard->value;
 }
 
-/* Make a new prediction for our shard.
+/* Calculate the change for our shard.
  * history_last_index is the newest item in the history.
  * server.history_index is the oldest item in the history.
  */
-void counterPredict(counter *cntr, mstime_t now, int history_last_index) {
+long double counterHistoryChange(counter *cntr, mstime_t now, int history_last_index) {
+    UNUSED(now);
     UNUSED(history_last_index);
     long double change = 0, last = cntr->myshard->value;
 
@@ -61,6 +62,11 @@ void counterPredict(counter *cntr, mstime_t now, int history_last_index) {
      */
     change = last - cntr->history[server.history_index];
 
+    return change;
+}
+
+/* Make a new prediction for our shard. */
+void counterPredict(counter *cntr, mstime_t now, long double change) {
     cntr->myshard->predict_time   = now;
     cntr->myshard->predict_value  = cntr->myshard->value;
     cntr->myshard->predict_change = change / ((long double)(server.history_size) * 1000.0);
@@ -537,9 +543,9 @@ void countersCron(void) {
 
     it = dictGetIterator(server.counters);
     while ((de = dictNext(it)) != NULL) {
-        long double rvalue, elapsed;
-        double diff;
+        long double rvalue, elapsed, diff, change;
         counter *cntr;
+        int miss;
 
         cntr = dictGetVal(de);
 
@@ -549,28 +555,46 @@ void countersCron(void) {
             continue;
         }
 
-        if (cntr->myshard->predict_time > 0) {
-            elapsed = (now - cntr->myshard->predict_time);
-            rvalue = cntr->myshard->predict_value + (elapsed * cntr->myshard->predict_change);
-            diff = fabs((double)(rvalue - cntr->myshard->value));
+        change = counterHistoryChange(cntr, now, history_last_index);
 
-            if (diff <= cntr->precision) {
+        if (cntr->myshard->predict_time > 0) {
+            miss = 0;
+
+            /* When our shard doesn't change anymore we should make sure it's predicted value
+             * matches the actual value otherwise we never have a mis-prediction and
+             * other instances will keep using our wrongly predicted value */
+            if (change == 0 && (cntr->myshard->predict_change != 0 || cntr->myshard->predict_value != cntr->myshard->value)) {
+                miss = 1;
+
+                serverLog(LL_DEBUG,"Counter %s needs a final prediction (%Lf != %Lf)",
+                      cntr->name, cntr->myshard->predict_value, cntr->myshard->value);
+            } else {
+                elapsed = (now - cntr->myshard->predict_time);
+                rvalue = cntr->myshard->predict_value + (elapsed * cntr->myshard->predict_change);
+                diff = fabsl(rvalue - cntr->myshard->value);
+
+                if (diff > cntr->precision) {
+                    miss = 1;
+
+                    serverLog(LL_DEBUG,"Counter %s needs new prediction (%Lf <= %f)",
+                        cntr->name, diff, cntr->precision);
+                }
+            }
+
+            if (miss == 0) {
                 /* It's still up to date, check if we need to resend our last prediction. */
                 counterMaybeResend(cntr);
 
                 /* Only count hits for when something actually changed but
-                 * is still within prediction. */
+                 * is still within our last prediction. */
                 if (cntr->history[history_last_index] != cntr->myshard->value) {
                     server.stat_hits++;
                     cntr->hits++;
                 }
 
-                counterUpdateHistory(cntr);
+                counterHistoryUpdate(cntr);
 
                 continue;
-            } else {
-                serverLog(LL_DEBUG,"Counter %s needs new prediction (%f <= %f)",
-                    cntr->name, diff, cntr->precision);
             }
         }
 
@@ -580,10 +604,10 @@ void countersCron(void) {
         cntr->misses++;
         cntr->revision++;
 
-        counterPredict(cntr, now, history_last_index);
+        counterPredict(cntr, now, change);
         clusterSendShard(cntr);
 
-        counterUpdateHistory(cntr);
+        counterHistoryUpdate(cntr);
 
         cntr->updated = mstime();
     }
