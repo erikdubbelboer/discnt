@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/ErikDubbelboer/discnt.svg)](https://travis-ci.org/ErikDubbelboer/discnt)
+[![Build Status](https://travis-ci.org/erikdubbelboer/discnt.svg)](https://travis-ci.org/erikdubbelboer/discnt)
 
 Discnt, in-memory, distributed counters
 ===
