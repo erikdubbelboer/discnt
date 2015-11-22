@@ -1,0 +1,14 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ 
+
+override_dh_auto_test:
+	true
+
+override_dh_auto_install:
+	true
+
+override_dh_usrlocal:
+	true
+

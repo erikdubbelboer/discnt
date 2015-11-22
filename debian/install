@@ -1,0 +1,3 @@
+src/discnt-server usr/bin
+src/discnt-cli usr/bin
+src/discnt-benchmark usr/bin

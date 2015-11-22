@@ -1,0 +1,17 @@
+Source: discnt
+Section: database
+Priority: extra
+Maintainer: Erik Dubbelboer <erik@dubbelboer.com>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 3.9.3
+Homepage: http://discnt.io/
+Vcs-Git: https://github.com/erikdubbelboer/discnt.git
+Vcs-Browser: https://github.com/erikdubbelboer/discnt
+
+Package: discnt
+Section: database
+Priority: extra
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: In memory distributed eventually consistent counters.
+ Discnt provides in memory distributed eventually consistent counters.
