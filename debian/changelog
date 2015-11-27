@@ -1,3 +1,9 @@
+discnt (1.0.3-0ubuntu1) precise; urgency=low
+
+  * Fix eventual consistency.
+
+ -- Erik Dubbelboer <erik@dubbelboer.com>  Fri, 27 Nov 2015 04:44:38 +0000
+
 discnt (1.0.2-1) precise; urgency=low
 
   * Initial PPA release.
