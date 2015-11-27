@@ -4,6 +4,7 @@ How to do a new release
 
 ```bash
 cd ..
+rm -rf ppa
 bzr branch lp:~discnt/+junk/discnt ppa
 cd ppa
 find . -not -wholename '*.bzr*' -delete
