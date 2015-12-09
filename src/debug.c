@@ -315,7 +315,7 @@ void _serverAssertPrintClientInfo(client *c) {
         if (c->argv[j]->type == OBJ_STRING && sdsEncodedObject(c->argv[j])) {
             arg = (char*) c->argv[j]->ptr;
         } else {
-            snprintf(buf,sizeof(buf),"Object type: %d, encoding: %d",
+            snprintf(buf,sizeof(buf),"Object type: %u, encoding: %u",
                 c->argv[j]->type, c->argv[j]->encoding);
             arg = buf;
         }
@@ -331,8 +331,8 @@ void _serverAssertPrintObject(robj *o) {
 }
 
 void serverLogObjectDebugInfo(robj *o) {
-    serverLog(LL_WARNING,"Object type: %d", o->type);
-    serverLog(LL_WARNING,"Object encoding: %d", o->encoding);
+    serverLog(LL_WARNING,"Object type: %u", o->type);
+    serverLog(LL_WARNING,"Object encoding: %u", o->encoding);
     serverLog(LL_WARNING,"Object refcount: %d", o->refcount);
     if (o->type == OBJ_STRING && sdsEncodedObject(o)) {
         serverLog(LL_WARNING,"Object raw string len: %zu", sdslen(o->ptr));

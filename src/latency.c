@@ -191,11 +191,9 @@ sds createLatencyReport(void) {
     sds report = sdsempty();
     int advise_disk_contention = 0; /* Try to lower disk contention. */
     int advise_scheduler = 0;       /* Intrinsic latency. */
-    int advise_data_writeback = 0;  /* data=writeback. */
-    int advise_no_appendfsync = 0;  /* don't fsync during rewrites. */
+    int advise_local_disk = 0;      /* Avoid remote disks. */
     int advise_ssd = 0;             /* Use an SSD drive. */
     int advise_hz = 0;              /* Use higher HZ. */
-    int advise_large_objects = 0;   /* Deletion of large objects. */
     int advices = 0;
 
     /* Return ASAP if the latency engine is disabled and it looks like it
@@ -237,7 +235,6 @@ sds createLatencyReport(void) {
 
         /* Potentially commands. */
         if (!strcasecmp(event,"command")) {
-            advise_large_objects = 1;
             advices += 2;
         }
 
@@ -247,17 +244,10 @@ sds createLatencyReport(void) {
             advices++;
         }
 
-        /* Expire cycle. */
-        if (!strcasecmp(event,"expire-cycle")) {
-            advise_hz = 1;
-            advise_large_objects = 1;
+        if (!strcasecmp(event,"ddb-unlink-temp-file")) {
+            advise_disk_contention = 1;
+            advise_local_disk = 1;
             advices += 2;
-        }
-
-        /* Eviction cycle. */
-        if (!strcasecmp(event,"eviction-cycle")) {
-            advise_large_objects = 1;
-            advices++;
         }
 
         report = sdscatlen(report,"\n",1);
@@ -283,28 +273,21 @@ sds createLatencyReport(void) {
             "  5) Check if the problem is allocator-related by recompiling Discnt with MALLOC=libc, if you are using Jemalloc. However this may create fragmentation problems.\n");
         }
 
-        if (advise_ssd) {
-            report = sdscat(report,"- SSD disks are able to reduce fsync latency, and total time needed for snapshotting and AOF log rewriting (resulting in smaller memory usage and smaller final AOF rewrite buffer flushes). With extremely high write load SSD disks can be a good option. However Discnt should perform reasonably with high load using normal disks. Use this advice as a last resort.\n");
+        /* Disk latency. */
+        if (advise_local_disk) {
+            report = sdscat(report,"- It is strongly advised to use local disks for persistence. Remote disks provided by platform-as-a-service providers are known to be slow.\n");
         }
 
-        if (advise_data_writeback) {
-            report = sdscat(report,"- Mounting ext3/4 filesystems with data=writeback can provide a performance boost compared to data=ordered, however this mode of operation provides less guarantees, and sometimes it can happen that after a hard crash the AOF file will have an half-written command at the end and will require to be repaired before Discnt restarts.\n");
+        if (advise_ssd) {
+            report = sdscat(report,"- SSD disks are able to reduce fsync latency, and total time needed for snapshotting. With extremely high write load SSD disks can be a good option. However Discnt should perform reasonably with high load using normal disks. Use this advice as a last resort.\n");
         }
 
         if (advise_disk_contention) {
-            report = sdscat(report,"- Try to lower the disk contention. This is often caused by other disk intensive processes running in the same computer (including other Discnt instances).\n");
-        }
-
-        if (advise_no_appendfsync) {
-            report = sdscat(report,"- Assuming from the point of view of data safety this is viable in your environment, you could try to enable the 'no-appendfsync-on-rewrite' option, so that fsync will not be performed while there is a child rewriting the AOF file or producing an DDB file (the moment where there is high disk contention).\n");
+            report = sdscat(report,"- Try to lower the disk contention. This is often caused by other disk intensive processes running in the same computer (including other Redis instances).\n");
         }
 
         if (advise_hz && server.hz < 100) {
-            report = sdscat(report,"- In order to make the Discnt keys expiring process more incremental, try to set the 'hz' configuration parameter to 100 using 'CONFIG SET hz 100'.\n");
-        }
-
-        if (advise_large_objects) {
-            report = sdscat(report,"- Deleting, expiring or evicting (because of maxmemory policy) large objects is a blocking operation. If you have very large objects that are often deleted, expired, or evicted, try to fragment those objects into multiple smaller objects.\n");
+            report = sdscat(report,"- In order to make the Discnt internal processes more incremental, try to set the 'hz' configuration parameter to 100 using 'CONFIG SET hz 100'.\n");
         }
     }
 

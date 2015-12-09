@@ -110,37 +110,37 @@ struct discntServer server; /* server global state */
  */
 struct serverCommand serverCommandTable[] = {
     /* Server commands. */
-    {"auth",authCommand,2,"rlF",0,NULL,0,0,0,0,0},
-    {"ping",pingCommand,-1,"rF",0,NULL,0,0,0,0,0},
-    {"info",infoCommand,-1,"rl",0,NULL,0,0,0,0,0},
-    {"shutdown",shutdownCommand,-1,"arl",0,NULL,0,0,0,0,0},
-    {"lastsave",lastsaveCommand,1,"rF",0,NULL,0,0,0,0,0},
-    {"monitor",monitorCommand,1,"ar",0,NULL,0,0,0,0,0},
-    {"debug",debugCommand,-2,"a",0,NULL,0,0,0,0,0},
-    {"config",configCommand,-2,"ar",0,NULL,0,0,0,0,0},
-    {"cluster",clusterCommand,-2,"ar",0,NULL,0,0,0,0,0},
-    {"client",clientCommand,-2,"ar",0,NULL,0,0,0,0,0},
-    {"time",timeCommand,1,"rF",0,NULL,0,0,0,0,0},
-    {"command",commandCommand,0,"rl",0,NULL,0,0,0,0,0},
-    {"latency",latencyCommand,-2,"arl",0,NULL,0,0,0,0,0},
-    {"hello",helloCommand,1,"rF",0,NULL,0,0,0,0,0},
-    {"save",saveCommand,1,"ar",0,NULL,0,0,0,0,0},
-    {"bgsave",bgsaveCommand,1,"ar",0,NULL,0,0,0,0,0},
+    {"auth",authCommand,2,"rlF",0,0,0,0,0,0},
+    {"ping",pingCommand,-1,"rF",0,0,0,0,0,0},
+    {"info",infoCommand,-1,"rl",0,0,0,0,0,0},
+    {"shutdown",shutdownCommand,-1,"arl",0,0,0,0,0,0},
+    {"lastsave",lastsaveCommand,1,"rF",0,0,0,0,0,0},
+    {"monitor",monitorCommand,1,"ar",0,0,0,0,0,0},
+    {"debug",debugCommand,-2,"a",0,0,0,0,0,0},
+    {"config",configCommand,-2,"ar",0,0,0,0,0,0},
+    {"cluster",clusterCommand,-2,"ar",0,0,0,0,0,0},
+    {"client",clientCommand,-2,"ar",0,0,0,0,0,0},
+    {"time",timeCommand,1,"rF",0,0,0,0,0,0},
+    {"command",commandCommand,0,"rl",0,0,0,0,0,0},
+    {"latency",latencyCommand,-2,"arl",0,0,0,0,0,0},
+    {"hello",helloCommand,1,"rF",0,0,0,0,0,0},
+    {"save",saveCommand,1,"ar",0,0,0,0,0,0},
+    {"bgsave",bgsaveCommand,1,"ar",0,0,0,0,0,0},
 
     /* Counter commands. */
-    {"incr",incrCommand,2,"wmF",0,NULL,0,0,0,0,0},
-    {"incrby",incrbyCommand,3,"wmF",0,NULL,0,0,0,0,0},
-    {"incrbyfloat",incrbyfloatCommand,3,"wmF",0,NULL,0,0,0,0,0},
-    {"decr",decrCommand,3,"wmF",0,NULL,0,0,0,0,0},
-    {"decrby",decrbyCommand,3,"wmF",0,NULL,0,0,0,0,0},
-    {"get",getCommand,-2,"rF",0,NULL,0,0,0,0,0},
-    {"mget",mgetCommand,-2,"r",0,NULL,1,-1,1,0,0},
-    {"keys",keysCommand,2,"r",0,NULL,0,0,0,0,0},
-    {"precision",precisionCommand,-2,"wmF",0,NULL,0,0,0,0,0},
-    {"set",setCommand,3,"wmF",0,NULL,0,0,0,0,0},
-    {"subscribe",subscribeCommand,-2,"rpl",0,NULL,0,0,0,0,0},
-    {"isubscribe",isubscribeCommand,-3,"rpl",0,NULL,0,0,0,0,0},
-    {"unsubscribe",unsubscribeCommand,-1,"rpl",0,NULL,0,0,0,0,0},
+    {"incr",incrCommand,2,"wmF",0,0,0,0,0,0},
+    {"incrby",incrbyCommand,3,"wmF",0,0,0,0,0,0},
+    {"incrbyfloat",incrbyfloatCommand,3,"wmF",0,0,0,0,0,0},
+    {"decr",decrCommand,3,"wmF",0,0,0,0,0,0},
+    {"decrby",decrbyCommand,3,"wmF",0,0,0,0,0,0},
+    {"get",getCommand,-2,"rF",0,0,0,0,0,0},
+    {"mget",mgetCommand,-2,"r",0,1,-1,1,0,0},
+    {"keys",keysCommand,2,"r",0,0,0,0,0,0},
+    {"precision",precisionCommand,-2,"wmF",0,0,0,0,0,0},
+    {"set",setCommand,3,"wmF",0,0,0,0,0,0},
+    {"subscribe",subscribeCommand,-2,"rpl",0,0,0,0,0,0},
+    {"isubscribe",isubscribeCommand,-3,"rpl",0,0,0,0,0,0},
+    {"unsubscribe",unsubscribeCommand,-1,"rpl",0,0,0,0,0,0},
 };
 
 /*============================ Utility functions ============================ */
@@ -661,6 +661,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     UNUSED(id);
     UNUSED(clientData);
     int j;
+    mstime_t start, duration;
 
     /* Software watchdog: deliver the SIGALRM that will reach the signal
      * handler if we don't return here fast enough. */
@@ -713,7 +714,10 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     }
 
     run_with_period(100) {
+        start = mstime();
         countersUpdateValues();
+        duration = mstime() - start;
+        latencyAddSampleIfNeeded("counters-update",duration);
     }
 
     /* Check if a background saving in progress terminated. */
@@ -727,7 +731,12 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
 
             if (WIFSIGNALED(statloc)) bysignal = WTERMSIG(statloc);
 
-            if (pid == server.ddb_child_pid) {
+            if (pid == -1) {
+                serverLog(LL_WARNING,"wait3() returned an error: %s. "
+                    "ddb_child_pid = %d",
+                    strerror(errno),
+                    (int) server.ddb_child_pid);
+            } else if (pid == server.ddb_child_pid) {
                 backgroundSaveDoneHandler(exitcode,bysignal);
             } else {
                 serverLog(LL_WARNING,
@@ -1458,6 +1467,14 @@ void call(client *c, int flags) {
     start = ustime();
     c->cmd->proc(c);
     duration = ustime()-start;
+
+    /* Log the command into the Slow log if needed, and populate the
+     * per-command statistics that we show in INFO commandstats. */
+    if (flags & CMD_CALL_SLOWLOG) {
+        char *latency_event = (c->cmd->flags & CMD_FAST) ?
+                              "fast-command" : "command";
+        latencyAddSampleIfNeeded(latency_event,duration/1000);
+    }
 
     /* Populate the per-command statistics that we show in INFO commandstats. */
     if (flags & CMD_CALL_STATS) {

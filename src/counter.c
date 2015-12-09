@@ -201,12 +201,13 @@ void countersUpdateValues(void) {
 
             /* Don't update predictions for failing nodes. */
             if (shrd->node == NULL || nodeFailed(shrd->node)) {
-                /*serverLog(LL_DEBUG,"Counter %s not using shard of %.40s",
-                    cntr->name, shrd->node_name);*/
-                continue;
-            }
+                /* Leave the prediction as it is. */
 
-            if (shrd->predict_time > 0 && shrd->predict_value != 0) {
+                /* TODO: Since this function is called 10 times per second we can't
+                   really do any debug output here. */
+                /*serverLog(LL_DEBUG,"Counter %s not updating shard of %.40s",
+                    cntr->name, shrd->node_name);*/
+            } else if (shrd->predict_time > 0 && shrd->predict_value != 0) {
                 elapsed = now - shrd->predict_time;
                 shrd->value = shrd->predict_value + (elapsed * shrd->predict_change);
 

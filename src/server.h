@@ -238,9 +238,9 @@ typedef long long mstime_t; /* millisecond time type. */
 
 /* Command call flags, see call() function */
 #define CMD_CALL_NONE 0
-#define CMD_CALL_STATS 2
-#define CMD_CALL_PROPAGATE 4
-#define CMD_CALL_FULL (CMD_CALL_STATS | CMD_CALL_PROPAGATE)
+#define CMD_CALL_SLOWLOG (1<<0)
+#define CMD_CALL_STATS (1<<1)
+#define CMD_CALL_FULL (CMD_CALL_SLOWLOG | CMD_CALL_STATS)
 
 /* DDB active child save type. */
 #define DDB_CHILD_TYPE_NONE 0
@@ -533,16 +533,13 @@ struct discntServer {
 };
 
 typedef void serverCommandProc(client *c);
-typedef int *serverGetKeysProc(struct serverCommand *cmd, robj **argv, int argc, int *numkeys);
+
 struct serverCommand {
     char *name;
     serverCommandProc *proc;
     int arity;
     char *sflags; /* Flags as string representation, one char per flag. */
     int flags;    /* The actual flags, obtained from the 'sflags' field. */
-    /* Use a function to determine keys arguments in a command line.
-     * Used for Discnt Cluster redirect. */
-    serverGetKeysProc *getkeys_proc;
     /* What keys should be loaded in background when calling this command? */
     int firstkey; /* The first argument that's a key (0 = no keys) */
     int lastkey;  /* The last argument that's a key */

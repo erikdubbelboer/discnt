@@ -2080,6 +2080,7 @@ void helloCommand(client *c) {
     dictForeach(server.cluster->nodes,de)
         clusterNode *node = dictGetVal(de);
         int priority = 1;
+        if (node->link == NULL && node != server.cluster->myself) priority = 5;
         if (node->flags & CLUSTER_NODE_PFAIL) priority = 10;
         if (node->flags & CLUSTER_NODE_FAIL) priority = 100;
         addReplyMultiBulkLen(c,4);
