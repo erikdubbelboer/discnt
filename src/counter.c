@@ -468,11 +468,9 @@ void keysCommand(client *c) {
  * Cluster related
  * -------------------------------------------------------------------------- */
 
-void countersClusterAddNode(clusterNode *node) {
+void countersSync(clusterNode *node) {
     dictIterator *it;
     dictEntry *de;
-
-    if (nodeInHandshake(node)) return;
 
     it = dictGetIterator(server.counters);
     while ((de = dictNext(it)) != NULL) {

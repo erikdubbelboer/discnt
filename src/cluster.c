@@ -654,8 +654,6 @@ void freeClusterNode(clusterNode *n) {
 int clusterAddNode(clusterNode *node) {
     int retval;
 
-    countersClusterAddNode(node);
-
     retval = dictAdd(server.cluster->nodes, node->name, node);
     return (retval == DICT_OK) ? C_OK : C_ERR;
 }
@@ -1182,6 +1180,9 @@ int clusterProcessPacket(clusterLink *link) {
                 link->node->flags &= ~CLUSTER_NODE_HANDSHAKE;
                 clusterDoBeforeSleep(CLUSTER_TODO_UPDATE_STATE|
                                      CLUSTER_TODO_SAVE_CONFIG);
+
+                /* When the handshaking is done we can sync all counters. */
+                countersSync(link->node);
             } else if (memcmp(link->node->name,hdr->sender,
                         CLUSTER_NAMELEN) != 0)
             {
