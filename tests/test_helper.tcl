@@ -13,6 +13,7 @@ source tests/support/util.tcl
 
 set ::all_tests {
     unit/printver
+    unit/introspection
     unit/auth
     unit/protocol
     unit/other
