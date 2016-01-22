@@ -538,6 +538,7 @@ int clientsCronHandleTimeout(client *c) {
     if (server.maxidletime &&
         !(c->flags & CLIENT_BLOCKED) &&  /* no timeout for blocked clients. */
         !(c->flags & CLIENT_PUBSUB) &&   /* no timeout for Pub/Sub clients */
+        !(c->flags & CLIENT_MONITOR) &&  /* no timeout for MONITOR clients. */
         (now - c->lastinteraction > server.maxidletime))
     {
         serverLog(LL_VERBOSE,"Closing idle client");
@@ -2099,7 +2100,7 @@ void infoCommand(client *c) {
 }
 
 void monitorCommand(client *c) {
-    /* ignore MONITOR if already slave or in monitor mode */
+    /* ignore MONITOR if already in monitor mode */
     if (c->flags & CLIENT_MONITOR) return;
 
     c->flags |= CLIENT_MONITOR;

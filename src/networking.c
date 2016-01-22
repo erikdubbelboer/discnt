@@ -705,6 +705,12 @@ void freeClient(client *c) {
      * places where active clients may be referenced. */
     unlinkClient(c);
 
+    if (c->flags & CLIENT_MONITOR) {
+        ln = listSearchKey(server.monitors,c);
+        serverAssert(ln != NULL);
+        listDelNode(server.monitors,ln);
+    }
+
     /* If this client was scheduled for async freeing we need to remove it
      * from the queue. */
     if (c->flags & CLIENT_CLOSE_ASAP) {
@@ -1087,7 +1093,7 @@ void processInputBuffer(client *c) {
     /* Keep processing while there is something in the input buffer */
     while(sdslen(c->querybuf)) {
         /* Return if clients are paused. */
-        if (clientsArePaused()) break;
+        if (!(c->flags & CLIENT_MONITOR) && clientsArePaused()) break;
 
         /* Immediately abort if the client is in the middle of something. */
         if (c->flags & CLIENT_BLOCKED) break;
@@ -1666,7 +1672,7 @@ int clientsArePaused(void) {
 
             /* Don't touch slaves and blocked clients. The latter pending
              * requests be processed when unblocked. */
-            if (c->flags & (CLIENT_BLOCKED)) continue;
+            if (c->flags & (CLIENT_MONITOR|CLIENT_BLOCKED)) continue;
             c->flags |= CLIENT_UNBLOCKED;
             listAddNodeTail(server.unblocked_clients,c);
         }
