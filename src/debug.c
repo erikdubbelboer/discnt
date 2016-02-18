@@ -214,6 +214,16 @@ void debugCommand(client *c) {
         sizes = sdscatprintf(sizes,"sdshdr32:%d ",(int)sizeof(struct sdshdr32));
         sizes = sdscatprintf(sizes,"sdshdr64:%d ",(int)sizeof(struct sdshdr64));
         addReplyBulkSds(c,sizes);
+    } else if (!strcasecmp(c->argv[1]->ptr,"sync") && c->argc == 3) {
+        clusterNode *node = clusterLookupNode(c->argv[2]->ptr);
+
+        if (node == NULL) {
+            addReplyError(c,"Unknown node");
+            return;
+        }
+
+        countersSync(node);
+        addReply(c,shared.ok);
     } else if (!strcasecmp(c->argv[1]->ptr,"counter") && c->argc == 3) {
         int i;
         char buf[5+40+2];

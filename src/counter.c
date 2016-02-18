@@ -259,6 +259,18 @@ void counterPubSub(counter *cntr, mstime_t now) {
     }
 }
 
+/* EXISTS key1 key2 ... key_N.
+ * Return value is the number of counters existing. */
+void existsCommand(client *c) {
+    long long count = 0;
+    int j;
+
+    for (j = 1; j < c->argc; j++) {
+        if (counterLookup(c->argv[j]->ptr) != NULL) count++;
+    }
+    addReplyLongLong(c,count);
+}
+
 /* -----------------------------------------------------------------------------
  * Counter related commands
  * -------------------------------------------------------------------------- */

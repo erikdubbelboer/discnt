@@ -79,9 +79,6 @@ struct discntServer server; /* server global state */
  * arity: number of arguments, it is possible to use -N to say >= N
  * sflags: command flags as string. See below for a table of flags.
  * flags: flags as bitmask. Computed by Discnt using the 'sflags' field.
- * get_keys_proc: an optional function to get key arguments from a command.
- *                This is only used when the following three fields are not
- *                enough to specify what arguments are keys.
  * first_key_index: first argument that is a key
  * last_key_index: last argument that is a key
  * key_step: step to get all the keys from first to last argument. For instance
@@ -141,6 +138,7 @@ struct serverCommand serverCommandTable[] = {
     {"subscribe",subscribeCommand,-2,"rpl",0,0,0,0,0,0},
     {"isubscribe",isubscribeCommand,-3,"rpl",0,0,0,0,0,0},
     {"unsubscribe",unsubscribeCommand,-1,"rpl",0,0,0,0,0,0},
+    {"exists",existsCommand,-2,"rF",0,0,0,0,0,0},
 };
 
 /*============================ Utility functions ============================ */

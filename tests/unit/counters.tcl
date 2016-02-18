@@ -63,4 +63,8 @@ start_server {tags {"counters"}} {
             assert {[r incrbyfloat test3 -0.1] eq {1.9}}
         }
     }
+
+    test {EXISTS} {
+        r exists test test2
+    } {2}
 }
