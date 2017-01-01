@@ -782,6 +782,7 @@ void clusterSendUpdate(mstime_t after);
 
 /* Counters */
 void countersCron(void);
+void countersCleanupCron(void);
 void countersUpdateValues(void);
 
 /* Blocked clients */

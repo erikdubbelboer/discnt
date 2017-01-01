@@ -625,3 +625,34 @@ void countersCron(void) {
     dictReleaseIterator(it);
 }
 
+/* This is executed every second */
+void countersCleanupCron(void) {
+    dictIterator *it;
+    dictEntry *de;
+
+    it = dictGetSafeIterator(server.counters);
+    while ((de = dictNext(it)) != NULL) {
+        counter *cntr;
+        listIter li;
+        listNode *ln;
+
+        cntr = dictGetVal(de);
+
+        listRewind(cntr->shards, &li);
+        while ((ln = listNext(&li)) != NULL) {
+            shard *shrd = listNodeValue(ln);
+            if (shrd->value == 0 && shrd->predict_value == 0 && shrd->predict_change == 0) {
+                if (shrd == cntr->myshard) {
+                    cntr->myshard = NULL;
+                }
+                listDelNode(cntr->shards, ln);
+            }
+        }
+
+        if (listLength(cntr->shards) == 0) {
+            dictDelete(server.counters, cntr->name);
+        }
+    }
+    dictReleaseIterator(it);
+}
+

@@ -43,7 +43,7 @@ start_server {tags {"counters"}} {
         r set test 1
     } {1}
 
-    test {GET aftet SET} {
+    test {GET after SET} {
         r get test
     } {1}
 

@@ -2075,10 +2075,14 @@ void clusterCommand(client *c) {
  * ID, IP, port, priority. A smaller priority means better node
  * in terms of availability / latency. */
 void helloCommand(client *c) {
+    dictIterator *di = dictGetIterator(server.cluster->nodes);
+    dictEntry *de;
+
     addReplyMultiBulkLen(c,2+dictSize(server.cluster->nodes));
     addReplyLongLong(c,1); /* Version. */
     addReplyBulkCBuffer(c,myself->name,CLUSTER_NAMELEN); /* My ID. */
-    dictForeach(server.cluster->nodes,de)
+
+    while((de = dictNext(di)) != NULL) {
         clusterNode *node = dictGetVal(de);
         int priority = 1;
         if (node->link == NULL && node != server.cluster->myself) priority = 5;
@@ -2089,7 +2093,8 @@ void helloCommand(client *c) {
         addReplyBulkCString(c,node->ip); /* IP address. */
         addReplyBulkLongLong(c,node->port); /* TCP port. */
         addReplyBulkLongLong(c,priority); /* Priority. */
-    dictEndForeach
+    }
+    dictReleaseIterator(di);
 }
 
 /* -----------------------------------------------------------------------------

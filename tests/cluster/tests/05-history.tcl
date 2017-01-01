@@ -37,11 +37,11 @@ test "Small counters should be accurate after a while" {
 
 test "Test for issue #1" {
     D 1 incrby issue1 0.0001
-    after 5000
+    after 5100
     set v [expr {double(round([D 2 get issue1]*10000))}]
     assert {$v == 1.0}
     D 1 incrby issue1 0.0001
-    after 5000
+    after 5100
     set v [expr {double(round([D 2 get issue1]*10000))}]
     assert {$v == 2.0}
 }

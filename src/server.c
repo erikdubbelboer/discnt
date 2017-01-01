@@ -712,6 +712,10 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
         countersCron();
     }
 
+    run_with_period(1000) {
+        countersCleanupCron();
+    }
+
     run_with_period(100) {
         start = mstime();
         countersUpdateValues();
