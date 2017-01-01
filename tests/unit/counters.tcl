@@ -67,4 +67,9 @@ start_server {tags {"counters"}} {
     test {EXISTS} {
         r exists test test2
     } {2}
+
+    test {MINCRBY counters} {
+			  r set test4 1
+        r mincrby 1 test4 test5 test6
+    } {2 1 1}
 }

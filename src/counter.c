@@ -130,7 +130,7 @@ counter *counterLookup(const sds name) {
 }
 
 /* Create a counter and add it to server.counters. */
-counter *counterCreate(sds name) {
+counter *counterCreate(const sds name) {
     counter *cntr = zcalloc(sizeof(counter) + (sizeof(long double) * server.history_size));
     cntr->name      = sdsdup(name);
     cntr->shards    = listCreate();
@@ -275,12 +275,12 @@ void existsCommand(client *c) {
  * Counter related commands
  * -------------------------------------------------------------------------- */
 
-void genericIncrCommand(client *c, long double increment) {
+void genericIncrCommand(client *c, const sds name, long double increment) {
     counter *cntr;
 
-    cntr = counterLookup(c->argv[1]->ptr);
+    cntr = counterLookup(name);
     if (cntr == NULL) {
-        cntr = counterCreate(c->argv[1]->ptr);
+        cntr = counterCreate(name);
     }
 
     if (cntr->myshard == NULL) {
@@ -295,32 +295,32 @@ void genericIncrCommand(client *c, long double increment) {
 }
 
 void incrCommand(client *c) {
-    genericIncrCommand(c, 1.0);
+    genericIncrCommand(c, c->argv[1]->ptr, 1.0);
 }
 
 void incrbyCommand(client *c) {
     long double increment;
     if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != C_OK)
         return;
-    genericIncrCommand(c, increment);
+    genericIncrCommand(c, c->argv[1]->ptr, increment);
 }
 
 void incrbyfloatCommand(client *c) {
     long double increment;
     if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != C_OK)
         return;
-    genericIncrCommand(c, increment);
+    genericIncrCommand(c, c->argv[1]->ptr, increment);
 }
 
 void decrCommand(client *c) {
-    genericIncrCommand(c, -1.0);
+    genericIncrCommand(c, c->argv[1]->ptr, -1.0);
 }
 
 void decrbyCommand(client *c) {
     long double increment;
     if (getLongDoubleFromObjectOrReply(c,c->argv[2],&increment,NULL) != C_OK)
         return;
-    genericIncrCommand(c, -increment);
+    genericIncrCommand(c, c->argv[1]->ptr, -increment);
 }
 
 void getCommand(client *c) {
@@ -474,6 +474,19 @@ void keysCommand(client *c) {
     }
     dictReleaseIterator(di);
     setDeferredMultiBulkLength(c,replylen,numkeys);
+}
+
+void mincrbyCommand(client *c) {
+    int j;
+    long double increment;
+
+    if (getLongDoubleFromObjectOrReply(c,c->argv[1],&increment,NULL) != C_OK)
+        return;
+
+    addReplyMultiBulkLen(c,c->argc-2);
+		for (j = 2; j < c->argc; j++) {
+				genericIncrCommand(c, c->argv[j]->ptr, increment);
+		}
 }
 
 /* -----------------------------------------------------------------------------

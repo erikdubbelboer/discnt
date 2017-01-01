@@ -263,7 +263,12 @@ struct commandHelp {
     "-",
     "Return the current server time",
     3,
-    "1.0.0" }
+    "1.0.0" },
+    { "MINCRBY",
+    "increment [key ...]",
+    "Increment the counters by the given amount",
+    1,
+    "1.0.5" },
 };
 
 #endif

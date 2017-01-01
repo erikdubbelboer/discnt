@@ -139,6 +139,7 @@ struct serverCommand serverCommandTable[] = {
     {"isubscribe",isubscribeCommand,-3,"rpl",0,0,0,0,0,0},
     {"unsubscribe",unsubscribeCommand,-1,"rpl",0,0,0,0,0,0},
     {"exists",existsCommand,-2,"rF",0,0,0,0,0,0},
+		{"mincrby",mincrbyCommand,-3,"wm",0,0,0,0,0,0},
 };
 
 /*============================ Utility functions ============================ */

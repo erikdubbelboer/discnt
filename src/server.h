@@ -828,6 +828,7 @@ void subscribeCommand(client *c);
 void isubscribeCommand(client *c);
 void unsubscribeCommand(client *c);
 void existsCommand(client *c);
+void mincrbyCommand(client *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));
