@@ -97,12 +97,11 @@ void dictCounterDestructor(void *privdata, void *val) {
     pubsub *p;
 
     /* Unsubscribe everyone */
-    if (cntr->subscribers != NULL) {
-        while (listLength(cntr->subscribers)) {
-            ln = listFirst(cntr->subscribers);
-            p  = listNodeValue(ln);
-            pubsubUnsubscribeCounter(p->c,cntr->name,1);
-        }
+    /* pubsubUnsubscribeCounter will set cntr->subscribers to NULL */
+    while (cntr->subscribers != NULL) {
+        ln = listFirst(cntr->subscribers);
+        p  = listNodeValue(ln);
+        pubsubUnsubscribeCounter(p->c,cntr->name,1);
     }
 
     /* Free all shards */
@@ -484,9 +483,9 @@ void mincrbyCommand(client *c) {
         return;
 
     addReplyMultiBulkLen(c,c->argc-2);
-		for (j = 2; j < c->argc; j++) {
-				genericIncrCommand(c, c->argv[j]->ptr, increment);
-		}
+    for (j = 2; j < c->argc; j++) {
+        genericIncrCommand(c, c->argv[j]->ptr, increment);
+    }
 }
 
 /* -----------------------------------------------------------------------------
@@ -663,7 +662,12 @@ void countersCleanupCron(void) {
         }
 
         if (listLength(cntr->shards) == 0) {
-            dictDelete(server.counters, cntr->name);
+            /* Don't delete counters that have subscribers as they keep
+             * a pointer to the counter.
+             */
+            if (cntr->subscribers == NULL) {
+                dictDelete(server.counters, cntr->name);
+            }
         }
     }
     dictReleaseIterator(it);

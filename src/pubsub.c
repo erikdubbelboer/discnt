@@ -83,11 +83,11 @@ int pubsubUnsubscribeCounter(client *c, sds name, int notify) {
 
     /* Remove the counter from the client -> counters hash table */
     if (c->sub_counters != NULL) {
-        de = dictFind(c->sub_counters,name);
+        de = dictUnlink(c->sub_counters,name);
         if (de != NULL) {
             retval = 1;
             cntr = dictGetVal(de);
-            dictDelete(c->sub_counters,name);
+            dictFreeUnlinkedEntry(c->sub_counters,de);
 
             listRewind(cntr->subscribers,&li);
             while ((ln = listNext(&li)) != NULL) {

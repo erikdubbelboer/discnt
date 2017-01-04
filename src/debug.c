@@ -742,7 +742,7 @@ void sigsegvHandler(int sig, siginfo_t *info, void *secret) {
     serverLog(LL_WARNING,
 "\n=== DISCNT BUG REPORT END. Make sure to include from START to END. ===\n\n"
 "       Please report the crash by opening an issue on github:\n\n"
-"           http://github.com/antirez/discnt/issues\n\n"
+"           http://github.com/erikdubbelboer/discnt/issues\n\n"
 "  Suspect RAM error? Use discnt-server --test-memory to verify it.\n\n"
 );
     /* free(messages); Don't call free() with possibly corrupted memory. */
