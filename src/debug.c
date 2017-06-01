@@ -273,6 +273,12 @@ void debugCommand(client *c) {
 
         addReplyLongLong(c, cntr->hits);
         addReplyLongLong(c, cntr->misses);
+    } else if (!strcasecmp(c->argv[1]->ptr,"resetshard") && c->argc == 3) {
+        counter *cntr = counterLookup(c->argv[2]->ptr);
+        if (cntr != NULL) {
+            counterResetShard(cntr);
+        }
+        addReply(c,shared.ok);
     } else if (!strcasecmp(c->argv[1]->ptr,"prediction") && c->argc == 3) {
         listNode *ln;
         listIter li;

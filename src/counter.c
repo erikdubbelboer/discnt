@@ -258,6 +258,33 @@ void counterPubSub(counter *cntr, mstime_t now) {
     }
 }
 
+void counterResetShard(counter *cntr) {
+    unsigned int i;
+
+    if (cntr->myshard == NULL) {
+        return;
+    }
+
+    if (cntr->myshard->value == 0) {
+        return;
+    }
+
+    cntr->value -= cntr->myshard->value;
+
+    cntr->myshard->value = 0;
+
+    /* Force a new prediction to be send. */
+    cntr->myshard->predict_time = 0;
+
+    /* Make sure the prediction is 0 so it doesn't change every second. */
+    for (i = 0; i < server.history_size; i++) {
+        cntr->history[i] = 0;
+    }
+
+    server.dirty++;
+    counterCacheResponse(cntr);
+}
+
 /* EXISTS key1 key2 ... key_N.
  * Return value is the number of counters existing. */
 void existsCommand(client *c) {

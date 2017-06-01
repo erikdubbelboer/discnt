@@ -1,1 +1,1 @@
-#define DISCNT_VERSION "1.0.5"
+#define DISCNT_VERSION "1.1.0"

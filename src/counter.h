@@ -86,5 +86,6 @@ counter *counterLookup(const sds name);
 counter *counterCreate(sds name);
 shard *counterAddShard(counter *cntr, clusterNode* node, const char *node_name);
 void countersSync(clusterNode *node);
+void counterResetShard(counter *cntr);
 
 #endif
