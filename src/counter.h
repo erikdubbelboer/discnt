@@ -33,6 +33,8 @@
 #include "adlist.h"
 #include "cluster.h"
 
+#define COUNTER_MAX 1e+20
+#define COUNTER_MIN -1e+20
 
 typedef struct shard {
     clusterNode *node;

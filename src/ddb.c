@@ -171,6 +171,9 @@ int ddbLoadLongDouble(rio *ddb, long double *val) {
         if (rioRead(ddb,buf,len) == 0) return -1;
         buf[len] = '\0';
         sscanf(buf, "%Lg", val);
+        if (*val > COUNTER_MAX || *val < COUNTER_MIN) {
+            *val = 0;
+        }
         return 0;
     }
 }

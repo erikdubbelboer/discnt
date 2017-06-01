@@ -286,8 +286,26 @@ void genericIncrCommand(client *c, const sds name, long double increment) {
         counterAddShard(cntr, myself, myself->name);
     }
 
-    cntr->myshard->value += increment;
-    cntr->value += increment;
+    long double newshardvalue = cntr->myshard->value + increment;
+    if (newshardvalue > COUNTER_MAX) {
+        addReplyErrorFormat(c, "Counter value out of allowed range");
+        return;
+    } else if (newshardvalue < COUNTER_MIN) {
+        addReplyErrorFormat(c, "Counter value out of allowed range");
+        return;
+    }
+
+    long double newvalue = cntr->value + increment;
+    if (newvalue > COUNTER_MAX) {
+        addReplyErrorFormat(c, "Counter value out of allowed range");
+        return;
+    } else if (newvalue < COUNTER_MIN) {
+        addReplyErrorFormat(c, "Counter value out of allowed range");
+        return;
+    }
+
+    cntr->myshard->value = newshardvalue;
+    cntr->value = newvalue;
     server.dirty++;
     counterCacheResponse(cntr);
     addReplyString(c,cntr->rbuf,cntr->rlen);
@@ -391,6 +409,14 @@ void setCommand(client *c) {
     if (getLongDoubleFromObjectOrReply(c,c->argv[2],&value,NULL) != C_OK)
         return;
 
+    if (value > COUNTER_MAX) {
+        addReplyErrorFormat(c, "Counter value out of allowed range");
+        return;
+    } else if (value < COUNTER_MIN) {
+        addReplyErrorFormat(c, "Counter value out of allowed range");
+        return;
+    }
+
     cntr = counterLookup(c->argv[1]->ptr);
     if (cntr == NULL) {
         cntr = counterCreate(c->argv[1]->ptr);
@@ -400,20 +426,29 @@ void setCommand(client *c) {
         counterAddShard(cntr,myself,myself->name);
     }
 
+    long double newshardvalue = value - (cntr->value - cntr->myshard->value);
+    if (newshardvalue > COUNTER_MAX) {
+        addReplyErrorFormat(c, "Counter value out of allowed range");
+        return;
+    } else if (newshardvalue < COUNTER_MIN) {
+        addReplyErrorFormat(c, "Counter value out of allowed range");
+        return;
+    }
+
     /* myshard->value        = 4
      * cntr->value           = 10
      * value                 = 2
      * value in other shards = 6
      * new myshard->value    = 2 - (10 - 4) = -4
      */
-    cntr->myshard->value = value - (cntr->value - cntr->myshard->value);
+    cntr->myshard->value = newshardvalue;
 
     /* Force a new prediction to be send. */
     cntr->myshard->predict_time = 0;
 
     /* Make sure the prediction is 0 so it doesn't change every second. */
     for (i = 0; i < server.history_size; i++) {
-        cntr->history[i] = cntr->myshard->value;
+        cntr->history[i] = newshardvalue;
     }
 
     cntr->value = value;
