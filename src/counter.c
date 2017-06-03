@@ -285,6 +285,60 @@ void counterResetShard(counter *cntr) {
     counterCacheResponse(cntr);
 }
 
+int counterShardsForNode(clusterNode *node) {
+    dictIterator *it;
+    dictEntry *de;
+    int count = 0;
+
+    it = dictGetIterator(server.counters);
+    while ((de = dictNext(it)) != NULL) {
+        counter *cntr;
+        listNode *ln;
+        listIter li;
+        shard *shrd;
+
+        cntr = dictGetVal(de);
+
+        listRewind(cntr->shards,&li);
+        while ((ln = listNext(&li)) != NULL) {
+            shrd = listNodeValue(ln);
+
+            if (shrd->node == node) {
+                count++;
+            }
+        }
+    }
+    dictReleaseIterator(it);
+
+    return count;
+}
+
+void counterDeleteShards(clusterNode *node) {
+    dictIterator *it;
+    dictEntry *de;
+
+    it = dictGetSafeIterator(server.counters);
+    while ((de = dictNext(it)) != NULL) {
+        counter *cntr;
+        listIter li;
+        listNode *ln;
+
+        cntr = dictGetVal(de);
+
+        listRewind(cntr->shards, &li);
+        while ((ln = listNext(&li)) != NULL) {
+            shard *shrd = listNodeValue(ln);
+            if (shrd->node == node) {
+                if (shrd == cntr->myshard) {
+                    cntr->myshard = NULL;
+                }
+                listDelNode(cntr->shards, ln);
+            }
+        }
+    }
+    dictReleaseIterator(it);
+}
+
 /* EXISTS key1 key2 ... key_N.
  * Return value is the number of counters existing. */
 void existsCommand(client *c) {

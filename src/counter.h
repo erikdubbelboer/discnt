@@ -47,7 +47,7 @@ typedef struct shard {
 
     mstime_t    predict_time;   /* Time we made the last prediction. */
     long double predict_value;  /* Value at the last prediction. */
-    long double predict_change; /* Change per micro second. */
+    long double predict_change; /* Change per millisecond. */
 } shard;
 
 /* Counter representation in memory. */
@@ -87,5 +87,7 @@ counter *counterCreate(sds name);
 shard *counterAddShard(counter *cntr, clusterNode* node, const char *node_name);
 void countersSync(clusterNode *node);
 void counterResetShard(counter *cntr);
+int counterShardsForNode(clusterNode *node);
+void counterDeleteShards(clusterNode *node);
 
 #endif

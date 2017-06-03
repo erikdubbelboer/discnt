@@ -2038,6 +2038,13 @@ void clusterCommand(client *c) {
             addReplyError(c,"I tried hard but I can't forget myself...");
             return;
         }
+
+        if (counterShardsForNode(n) > 0) {
+              addReplyErrorFormat(c,"node still has active shards");
+              return;
+        }
+
+        counterDeleteShards(n);
         clusterBlacklistAddNode(n);
         clusterDelNode(n);
         clusterDoBeforeSleep(CLUSTER_TODO_UPDATE_STATE|

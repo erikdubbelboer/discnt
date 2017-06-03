@@ -224,6 +224,20 @@ void debugCommand(client *c) {
 
         countersSync(node);
         addReply(c,shared.ok);
+    } else if (!strcasecmp(c->argv[1]->ptr,"node") && c->argc >= 3) {
+        if (!strcasecmp(c->argv[2]->ptr,"shards") && c->argc == 4) {
+            clusterNode *node = clusterLookupNode(c->argv[3]->ptr);
+
+            if (node == NULL) {
+                addReplyError(c,"Unknown node");
+                return;
+            }
+
+            addReplyLongLong(c, counterShardsForNode(node));
+        } else {
+            addReplyErrorFormat(c, "Unknown DEBUG NODE subcommand or wrong number of arguments for '%s'",
+                (char*)c->argv[2]->ptr);
+        }
     } else if (!strcasecmp(c->argv[1]->ptr,"counter") && c->argc == 3) {
         int i;
         char buf[5+40+2];
