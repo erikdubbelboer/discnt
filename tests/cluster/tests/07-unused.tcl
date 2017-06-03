@@ -5,7 +5,7 @@ test "0 counters should be deleted" {
     D 0 set test1 0
 
     # Wait for one sync+delete round.
-    after 2100
+    after 4100
 
     for {set i 0} {$i < $::instances_count} {incr i} {
         set v [D $i exists test1]
@@ -37,7 +37,7 @@ test "0 shards should be deleted" {
     D 0 set test2 0
 
     # Wait for one sync+delete round.
-    after 2100
+    after 5100
 
     for {set i 0} {$i < $::instances_count} {incr i} {
         set v [D $i debug counter test2]
@@ -58,7 +58,7 @@ test "delete with subscribers" {
     D 0 set test3 0
 
     # Wait for one sync+delete round.
-    after 2100
+    after 4100
 
     set v0 [D 0 exists test3]
     assert {$v0 == 0}

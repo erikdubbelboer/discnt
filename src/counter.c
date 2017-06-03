@@ -703,6 +703,7 @@ void countersCron(void) {
 void countersCleanupCron(void) {
     dictIterator *it;
     dictEntry *de;
+    mstime_t notafter = mstime() - 2000; /* Don't delete counters that changed in the last N milliseconds. */
 
     it = dictGetSafeIterator(server.counters);
     while ((de = dictNext(it)) != NULL) {
@@ -712,9 +713,17 @@ void countersCleanupCron(void) {
 
         cntr = dictGetVal(de);
 
+        // Don't delete counters that might haven't synced yet.
+        if (cntr->want_acks != NULL && dictSize(cntr->want_acks) > 0) {
+            continue;
+        }
+
         listRewind(cntr->shards, &li);
         while ((ln = listNext(&li)) != NULL) {
             shard *shrd = listNodeValue(ln);
+            if (shrd->predict_time == 0 || shrd->predict_time > notafter) {
+                continue;
+            }
             if (shrd->value == 0 && shrd->predict_value == 0 && shrd->predict_change == 0) {
                 if (shrd == cntr->myshard) {
                     cntr->myshard = NULL;
