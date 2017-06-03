@@ -287,10 +287,13 @@ void debugCommand(client *c) {
 
         addReplyLongLong(c, cntr->hits);
         addReplyLongLong(c, cntr->misses);
-    } else if (!strcasecmp(c->argv[1]->ptr,"resetshard") && c->argc == 3) {
+    } else if (!strcasecmp(c->argv[1]->ptr,"resetshard") && c->argc == 4) {
         counter *cntr = counterLookup(c->argv[2]->ptr);
+        clusterNode *node = clusterLookupNode(c->argv[3]->ptr);
         if (cntr != NULL) {
-            counterResetShard(cntr);
+            if (node != NULL) {
+                counterResetShard(cntr, node);
+            }
         }
         addReply(c,shared.ok);
     } else if (!strcasecmp(c->argv[1]->ptr,"prediction") && c->argc == 3) {

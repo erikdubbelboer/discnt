@@ -258,30 +258,31 @@ void counterPubSub(counter *cntr, mstime_t now) {
     }
 }
 
-void counterResetShard(counter *cntr) {
-    unsigned int i;
+void counterResetShard(counter *cntr, clusterNode *node) {
+    listNode *ln;
+    listIter li;
 
-    if (cntr->myshard == NULL) {
-        return;
+    listRewind(cntr->shards,&li);
+    while ((ln = listNext(&li)) != NULL) {
+        shard *shrd = listNodeValue(ln);
+
+        if (shrd->node == node) {
+            cntr->value -= shrd->value;
+
+            shrd->value = 0;
+            if (shrd == cntr->myshard) {
+                shrd->predict_time = 0;
+            } else {
+                shrd->predict_time = mstime();
+            }
+            shrd->predict_value = 0;
+            shrd->predict_change = 0;
+
+            server.dirty++;
+            break;
+        }
     }
 
-    if (cntr->myshard->value == 0) {
-        return;
-    }
-
-    cntr->value -= cntr->myshard->value;
-
-    cntr->myshard->value = 0;
-
-    /* Force a new prediction to be send. */
-    cntr->myshard->predict_time = 0;
-
-    /* Make sure the prediction is 0 so it doesn't change every second. */
-    for (i = 0; i < server.history_size; i++) {
-        cntr->history[i] = 0;
-    }
-
-    server.dirty++;
     counterCacheResponse(cntr);
 }
 
