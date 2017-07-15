@@ -188,6 +188,10 @@ void countersUpdateValues(void) {
 
         cntr = dictGetVal(de);
 
+        if (!cntr->dirty) {
+            continue;
+        }
+
         listRewind(cntr->shards,&li);
         while ((ln = listNext(&li)) != NULL) {
             shrd = listNodeValue(ln);
@@ -225,6 +229,9 @@ void countersUpdateValues(void) {
 
             /* Make sure the cached response gets recalculated. */
             cntr->rlen = 0;
+        } else {
+            /* The value stayed the same so mark it as not dirty anymore. */
+            cntr->dirty = 0;
         }
     }
     dictReleaseIterator(it);
@@ -274,16 +281,16 @@ void counterResetShard(counter *cntr, clusterNode *node) {
                 shrd->predict_time = 0;
             } else {
                 shrd->predict_time = mstime();
+                cntr->dirty = 1;
             }
             shrd->predict_value = 0;
             shrd->predict_change = 0;
 
             server.dirty++;
-            break;
+            counterCacheResponse(cntr);
+            return;
         }
     }
-
-    counterCacheResponse(cntr);
 }
 
 int counterShardsForNode(clusterNode *node) {
@@ -665,6 +672,23 @@ void counterMaybeResend(counter *cntr) {
             clusterSendShardToNode(cntr, node);
         }
     }
+}
+
+int counterDirty(void) {
+    int count = 0;
+    dictIterator *it;
+    dictEntry *de;
+
+    it = dictGetIterator(server.counters);
+    while ((de = dictNext(it)) != NULL) {
+        counter *cntr = dictGetVal(de);
+
+        if (cntr->dirty) {
+            count++;
+        }
+    }
+
+    return count;
 }
 
 /* -----------------------------------------------------------------------------

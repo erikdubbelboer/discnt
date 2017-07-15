@@ -72,6 +72,8 @@ typedef struct counter {
     int rlen;
 
     list *subscribers; /* Map of clients subscribed to this counter. */
+
+    int dirty;
 } counter;
 
 

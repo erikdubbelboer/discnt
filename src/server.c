@@ -1974,10 +1974,12 @@ sds genDiscntInfoString(char *section) {
             "# Counters\r\n"
             "counters:%lu\r\n"
             "hits:%lld\r\n"
-            "misses:%lld\r\n",
+            "misses:%lld\r\n"
+            "dirty:%d\r\n",
             dictSize(server.counters),
             server.stat_hits,
-            server.stat_misses);
+            server.stat_misses,
+            counterDirty());
     }
 
     /* Persistence */

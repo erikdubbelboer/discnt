@@ -408,6 +408,8 @@ int ddbLoadCounter(rio *ddb) {
 
     cntr = counterCreate(name);
 
+    cntr->dirty = 1;
+
     if ((cntr->revision = ddbLoadLen(ddb)) == DDB_LENERR) goto rerr;
 
     if (ddbLoadDouble(ddb,&cntr->precision) == -1) goto rerr;
