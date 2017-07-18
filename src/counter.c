@@ -155,86 +155,45 @@ shard *counterAddShard(counter *cntr, clusterNode* node, const char *node_name) 
 }
 
 /* Build the counter's cached response buffer. */
-void counterCacheResponse(counter *cntr) {
-    char dbuf[128];
-    int dlen;
-
-    if (isinf(cntr->value)) {
-        if (cntr->value > 0) {
-            strcpy(cntr->rbuf, OBJ_SHARED_INF); /* inf */
-            cntr->rlen = sizeof(OBJ_SHARED_INF)-1;
-        } else {
-            strcpy(cntr->rbuf, OBJ_SHARED_NINF); /* -inf */
-            cntr->rlen = sizeof(OBJ_SHARED_NINF)-1;
-        }
-    } else {
-        dlen = snprintf(dbuf,sizeof(dbuf),"%.17Lg",cntr->value);
-        cntr->rlen = snprintf(cntr->rbuf,sizeof(cntr->rbuf),"$%d\r\n%s\r\n",dlen,dbuf);
-    }
+void addReplyCounter(client *c, counter *cntr) {
+    addReplyLongDouble(c, cntr->value);
 }
 
-void countersUpdateValues(void) {
-    dictIterator *it;
-    dictEntry *de;
+void countersUpdateValue(counter *cntr) {
     mstime_t now = mstime();
+    long double elapsed;
+    listNode *ln;
+    listIter li;
+    shard *shrd;
 
-    it = dictGetIterator(server.counters);
-    while ((de = dictNext(it)) != NULL) {
-        long double elapsed, value = 0;
-        counter *cntr;
-        listNode *ln;
-        listIter li;
-        shard *shrd;
+    cntr->value = 0;
 
-        cntr = dictGetVal(de);
+    listRewind(cntr->shards,&li);
+    while ((ln = listNext(&li)) != NULL) {
+        shrd = listNodeValue(ln);
 
-        if (!cntr->dirty) {
+        /* Don't do a prediction with our own shard. */
+        if (shrd == cntr->myshard) {
+            cntr->value += shrd->value;
             continue;
         }
 
-        listRewind(cntr->shards,&li);
-        while ((ln = listNext(&li)) != NULL) {
-            shrd = listNodeValue(ln);
+        elapsed = now - shrd->predict_time;
+        shrd->value = shrd->predict_value + (elapsed * shrd->predict_change);
 
-            /* Don't do a prediction with our own shard. */
-            if (shrd == cntr->myshard) {
-                value += shrd->value;
-                continue;
-            }
-
-            /* Don't update predictions for failing nodes. */
-            if (shrd->node == NULL || nodeFailed(shrd->node)) {
-                /* Leave the prediction as it is. */
-
-                /* TODO: Since this function is called 10 times per second we can't
-                   really do any debug output here. */
-                /*serverLog(LL_DEBUG,"Counter %s not updating shard of %.40s",
-                    cntr->name, shrd->node_name);*/
-            } else if (shrd->predict_time > 0 && shrd->predict_value != 0) {
-                elapsed = now - shrd->predict_time;
-                shrd->value = shrd->predict_value + (elapsed * shrd->predict_change);
-
-                /*serverLog(LL_DEBUG,"Counter %s new value %Lf for shard %.40s",
-                    cntr->name, shrd->value, shrd->node_name);
-            } else {
-                serverLog(LL_DEBUG,"Counter %s not using shard of %.40s %llu %Lf",
-                    cntr->name, shrd->node_name, shrd->predict_time, shrd->predict_value);*/
-            }
-
-            value += shrd->value;
-        }
-
-        if (cntr->value != value) {
-            cntr->value = value;
-
-            /* Make sure the cached response gets recalculated. */
-            cntr->rlen = 0;
+        /*if (shrd->node == NULL || nodeFailed(shrd->node)) {
+            serverLog(LL_DEBUG,"Counter %s not updating shard of %.40s",
+                cntr->name, shrd->node_name);
+        } else if (shrd->predict_time > 0 && shrd->predict_value != 0) {
+            serverLog(LL_DEBUG,"Counter %s new value %Lf for shard %.40s",
+                cntr->name, shrd->value, shrd->node_name);
         } else {
-            /* The value stayed the same so mark it as not dirty anymore. */
-            cntr->dirty = 0;
-        }
+            serverLog(LL_DEBUG,"Counter %s not using shard of %.40s %llu %Lf",
+                cntr->name, shrd->node_name, shrd->predict_time, shrd->predict_value);
+        }*/
+
+        cntr->value += shrd->value;
     }
-    dictReleaseIterator(it);
 }
 
 void counterPubSub(counter *cntr, mstime_t now) {
@@ -251,6 +210,7 @@ void counterPubSub(counter *cntr, mstime_t now) {
         if (p->next > now) {
             continue;
         }
+        countersUpdateValue(cntr);
         if (p->lastvalue == cntr->value) {
             continue;
         }
@@ -258,7 +218,7 @@ void counterPubSub(counter *cntr, mstime_t now) {
         addReply(p->c,shared.mbulkhdr[3]);
         addReply(p->c,shared.messagebulk);
         addReplyBulkCBuffer(p->c,cntr->name,sdslen(cntr->name));
-        addReplyLongDouble(p->c, cntr->value);
+        addReplyCounter(p->c, cntr);
 
         p->next      = now + p->seconds*1000;
         p->lastvalue = cntr->value;
@@ -281,13 +241,11 @@ void counterResetShard(counter *cntr, clusterNode *node) {
                 shrd->predict_time = 0;
             } else {
                 shrd->predict_time = mstime();
-                cntr->dirty = 1;
             }
             shrd->predict_value = 0;
             shrd->predict_change = 0;
 
             server.dirty++;
-            counterCacheResponse(cntr);
             return;
         }
     }
@@ -384,6 +342,8 @@ void genericIncrCommand(client *c, const sds name, long double increment) {
         return;
     }
 
+    countersUpdateValue(cntr);
+
     long double newvalue = cntr->value + increment;
     if (newvalue > COUNTER_MAX) {
         addReplyErrorFormat(c, "Counter value out of allowed range");
@@ -396,8 +356,7 @@ void genericIncrCommand(client *c, const sds name, long double increment) {
     cntr->myshard->value = newshardvalue;
     cntr->value = newvalue;
     server.dirty++;
-    counterCacheResponse(cntr);
-    addReplyString(c,cntr->rbuf,cntr->rlen);
+    addReplyCounter(c,cntr);
 }
 
 void incrCommand(client *c) {
@@ -448,16 +407,13 @@ void getCommand(client *c) {
         return;
     }
 
-    /* Do we need to recalculate the cached response? */
-    if (cntr->rlen == 0) {
-        counterCacheResponse(cntr);
-    }
+    countersUpdateValue(cntr);
 
     if (c->argc == 2) {
-        addReplyString(c,cntr->rbuf,cntr->rlen);
+        addReplyCounter(c,cntr);
     } else if (!strcasecmp(c->argv[2]->ptr,"state")) {
         addReplyMultiBulkLen(c,2);
-        addReplyString(c,cntr->rbuf,cntr->rlen);
+        addReplyCounter(c,cntr);
         if (server.cluster->failing_nodes_count > 0) {
             addReplyString(c, OBJ_SHARED_INCONSISTENT, sizeof(OBJ_SHARED_INCONSISTENT)-1);
         } else {
@@ -480,12 +436,7 @@ void mgetCommand(client *c) {
         if (cntr == NULL) {
             addReplyString(c,OBJ_SHARED_0STR,sizeof(OBJ_SHARED_0STR)-1);
         } else {
-            /* Do we need to recalculate the cached response? */
-            if (cntr->rlen == 0) {
-                counterCacheResponse(cntr);
-            }
-
-            addReplyString(c,cntr->rbuf,cntr->rlen);
+            addReplyCounter(c,cntr);
         }
     }
 }
@@ -515,6 +466,8 @@ void setCommand(client *c) {
         counterAddShard(cntr,myself,myself->name);
     }
 
+    countersUpdateValue(cntr);
+
     long double newshardvalue = value - (cntr->value - cntr->myshard->value);
     if (newshardvalue > COUNTER_MAX) {
         addReplyErrorFormat(c, "Counter value out of allowed range");
@@ -542,8 +495,7 @@ void setCommand(client *c) {
 
     cntr->value = value;
     server.dirty++;
-    counterCacheResponse(cntr);
-    addReplyString(c,cntr->rbuf,cntr->rlen);
+    addReplyCounter(c,cntr);
 }
 
 void precisionCommand(client *c) {
@@ -672,23 +624,6 @@ void counterMaybeResend(counter *cntr) {
             clusterSendShardToNode(cntr, node);
         }
     }
-}
-
-int counterDirty(void) {
-    int count = 0;
-    dictIterator *it;
-    dictEntry *de;
-
-    it = dictGetIterator(server.counters);
-    while ((de = dictNext(it)) != NULL) {
-        counter *cntr = dictGetVal(de);
-
-        if (cntr->dirty) {
-            count++;
-        }
-    }
-
-    return count;
 }
 
 /* -----------------------------------------------------------------------------

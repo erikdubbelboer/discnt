@@ -7,7 +7,6 @@ start_server {tags {"other"}} {
     }
 
     test {BGSAVE} {
-        waitForBgsave r
         r debug flushall
         r save
         r incrby x 10

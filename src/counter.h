@@ -61,19 +61,13 @@ typedef struct counter {
 
     uint32_t revision;
     dict     *want_acks;
-    mstime_t updated;
+    mstime_t updated;  /* When did we last broadcast the value. */
     double precision;  /* Desired prediction precision. */
 
     uint32_t hits;
     uint32_t misses;
 
-    /* Cached output buffer. */
-    char rbuf[128];
-    int rlen;
-
     list *subscribers; /* Map of clients subscribed to this counter. */
-
-    int dirty;
 } counter;
 
 
@@ -87,6 +81,7 @@ void counterGotAck(counter *cntr, const clusterNode *node);
 counter *counterLookup(const sds name);
 counter *counterCreate(sds name);
 shard *counterAddShard(counter *cntr, clusterNode* node, const char *node_name);
+void countersUpdateValue(counter *cntr);
 void countersSync(clusterNode *node);
 void counterResetShard(counter *cntr, clusterNode *node);
 int counterShardsForNode(clusterNode *node);

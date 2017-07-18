@@ -114,6 +114,9 @@ void computeDatasetDigest(unsigned char *final) {
     while((de = dictNext(di)) != NULL) {
         counter* cntr;
         sds key;
+        listNode *ln;
+        listIter li;
+        shard *shrd;
 
         memset(digest,0,20); /* This key-val digest */
 
@@ -123,8 +126,15 @@ void computeDatasetDigest(unsigned char *final) {
         cntr = dictGetVal(de);
 
         mixDigest(digest,cntr->name,sdslen(cntr->name));
-        mixDigest(digest,&cntr->value,sizeof(cntr->value));
         mixDigest(digest,&cntr->precision,sizeof(cntr->precision));
+
+        listRewind(cntr->shards,&li);
+        while ((ln = listNext(&li)) != NULL) {
+            shrd = listNodeValue(ln);
+            mixDigest(digest,&shrd->predict_time,sizeof(shrd->predict_time));
+            mixDigest(digest,&shrd->predict_value,sizeof(shrd->predict_value));
+            mixDigest(digest,&shrd->predict_change,sizeof(shrd->predict_change));
+        }
 
         /* We can finally xor the key-val digest to the final digest */
         xorDigest(final,digest,20);
@@ -249,6 +259,8 @@ void debugCommand(client *c) {
             addReplyError(c,"Unknown counter");
             return;
         }
+
+        countersUpdateValue(cntr);
 
         addReplyMultiBulkLen(c,7);
 

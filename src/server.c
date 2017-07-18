@@ -717,13 +717,6 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
         countersCleanupCron();
     }
 
-    run_with_period(100) {
-        start = mstime();
-        countersUpdateValues();
-        duration = mstime() - start;
-        latencyAddSampleIfNeeded("counters-update",duration);
-    }
-
     /* Check if a background saving in progress terminated. */
     if (server.ddb_child_pid != -1) {
         int statloc;
@@ -1974,12 +1967,10 @@ sds genDiscntInfoString(char *section) {
             "# Counters\r\n"
             "counters:%lu\r\n"
             "hits:%lld\r\n"
-            "misses:%lld\r\n"
-            "dirty:%d\r\n",
+            "misses:%lld\r\n",
             dictSize(server.counters),
             server.stat_hits,
-            server.stat_misses,
-            counterDirty());
+            server.stat_misses);
     }
 
     /* Persistence */

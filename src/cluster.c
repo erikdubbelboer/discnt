@@ -2215,7 +2215,6 @@ void cluserReadShard(const clusterMsgDataCounter *msg, clusterNode *node) {
 
     clusterSendAck(node, revision, name);
     
-    cntr->dirty = 1;
     server.dirty++;
 
     sdsfree(name);
